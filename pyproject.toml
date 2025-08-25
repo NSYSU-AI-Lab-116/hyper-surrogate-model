@@ -1,0 +1,53 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hypersurrogatemodel"
+version = "0.1.0"
+description = "AI model fine-tuning with Gemma-3-270m-it"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "matplotlib>=3.10.5",
+    "pandas>=2.3.1",
+    "torch>=2.8.0",
+    "tqdm>=4.67.1",
+    "transformers>=4.55.2",
+    "datasets>=3.0.0",
+    "accelerate>=1.1.0",
+    "peft>=0.13.0",
+    "scikit-learn>=1.3.0",
+    "safetensors>=0.4.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "black>=24.0.0",
+    "flake8>=7.0.0",
+    "jupyter>=1.0.0",
+]
+
+[project.scripts]
+build = "dev_tools.ci:build"
+train = "hypersurrogatemodel.train:main"
+
+[tool.hatch.envs.default]
+dependencies = [
+    "pytest",
+    "black",
+    "flake8",
+]
+
+[tool.hatch.envs.training]
+dependencies = [
+    "datasets",
+    "accelerate",
+    "peft",
+    "wandb",
+]
+
+[tool.hatch.envs.training.scripts]
+train = "python -m hypersurrogatemodel.train"
+evaluate = "python -m hypersurrogatemodel.evaluate"

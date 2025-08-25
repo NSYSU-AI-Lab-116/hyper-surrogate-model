@@ -208,3 +208,6 @@ __marimo__/
 
 # Project specific
 experiments/
+
+test.py
+data/raw/NAS-Bench-201-v1_1-096897.pth

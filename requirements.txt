@@ -1,7 +1,7 @@
 # Enhanced LLM Model Requirements
 
 # Core ML libraries
-torch>=2.0.0
+torch==2.0.0
 transformers>=4.30.0
 datasets>=2.10.0
 peft>=0.4.0
@@ -42,3 +42,7 @@ ipywidgets>=8.0.0
 # Monitoring (optional)
 wandb>=0.15.0
 tensorboard>=2.13.0
+
+# Data preprocessing
+nas-bench-201
+pyarrow

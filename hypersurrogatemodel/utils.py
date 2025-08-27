@@ -557,16 +557,47 @@ class ConfigManager:
         self.configs[name] = config
 
 
+class ColoredFormatter(logging.Formatter):
+    """
+    Custom formatter to add colors to log messages.
+    """
+    
+    # ANSI color codes
+    COLORS = {
+        'DEBUG': '\033[36m',      # Cyan
+        'INFO': '\033[32m',       # Green
+        'WARNING': '\033[33m',    # Yellow
+        'ERROR': '\033[31m',      # Red
+        'CRITICAL': '\033[35m',   # Magenta
+        'RESET': '\033[0m'        # Reset
+    }
+    
+    def __init__(self, pattern, use_colors=True):
+        super().__init__(pattern)
+        self.use_colors = use_colors
+    
+    def format(self, record):
+        if self.use_colors:
+            # Add color to level name
+            levelname = record.levelname
+            if levelname in self.COLORS:
+                colored_levelname = f"{self.COLORS[levelname]}{levelname}{self.COLORS['RESET']}"
+                record.levelname = colored_levelname
+        
+        return super().format(record)
+
+
 class Logger:
     """
-    Enhanced logger with file and console output.
+    Enhanced logger with file and console output, supporting colored output.
     """
     
     def __init__(
         self, 
         name: str = "enhanced_llm", 
         log_dir: str = "./logs",
-        level: str = "INFO"
+        level: str = "INFO",
+        use_colors: bool = True
     ):
         """
         Initialize logger.
@@ -575,9 +606,11 @@ class Logger:
             name: Logger name
             log_dir: Directory for log files
             level: Logging level
+            use_colors: Enable colored console output
         """
         self.log_dir = Path(log_dir)
         self.log_dir.mkdir(parents=True, exist_ok=True)
+        self.use_colors = use_colors
         
         # Create logger
         self.logger = logging.getLogger(name)
@@ -586,15 +619,16 @@ class Logger:
         # Clear existing handlers
         self.logger.handlers = []
         
-        # Console handler
+        # Console handler with colors
         console_handler = logging.StreamHandler()
-        console_formatter = logging.Formatter(
-            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        console_formatter = ColoredFormatter(
+            '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            use_colors=use_colors
         )
         console_handler.setFormatter(console_formatter)
         self.logger.addHandler(console_handler)
         
-        # File handler
+        # File handler (no colors for file output)
         log_file = self.log_dir / f"{name}_{datetime.now().strftime('%Y%m%d')}.log"
         file_handler = logging.FileHandler(log_file)
         file_formatter = logging.Formatter(
@@ -618,3 +652,19 @@ class Logger:
     def debug(self, message: str) -> None:
         """Log debug message."""
         self.logger.debug(message)
+    
+    def critical(self, message: str) -> None:
+        """Log critical message."""
+        self.logger.critical(message)
+    
+    def success(self, message: str) -> None:
+        """Log success message (using info level with green color)."""
+        self.info(f"✅ {message}")
+    
+    def step(self, message: str) -> None:
+        """Log step message (using info level with special formatting)."""
+        self.info(f"🔄 {message}")
+    
+    def result(self, message: str) -> None:
+        """Log result message (using info level with special formatting)."""
+        self.info(f"📊 {message}")

@@ -32,7 +32,7 @@ class PromptTemplate:
         Initialize prompt template.
         
         Args:
-            template_type: Type of template (currently only "classification" is supported)
+            template_type: "classification")
         """
         self.template_type = template_type
         self.templates = self._load_templates()
@@ -44,18 +44,6 @@ class PromptTemplate:
                 """
                     Please analys the below data and choose the most suitable surrogate model combination for training its archtechture within its domain.
                     {text}
-
-                    request:
-
-                    請仔細分析上述資料的主要特徵，包含數據特徵、單位、以及結構，然後為其好澤一個最合適的替代模型架構。
-
-                    分析過程：
-                    1. 識別關鍵詞和語義特徵
-                    2. 判斷情感傾向和語調
-                    3. 考慮上下文語境
-                    4. 做出分類決定
-
-                    分類結果：
                 """
         }
         return templates

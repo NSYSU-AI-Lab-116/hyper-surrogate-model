@@ -55,15 +55,14 @@ def main():
     prompt_template.add_custom_template(
         name="multi_class_classification",
         template="""
-任務：文本分類
+        task: classification
 
-請分析以下文本並將其分類到最合適的類別中：
+        Please classify the following text into one of the predefined categories:
 
-文本：{text}
+        text:{text}
 
-請根據文本內容選擇最適合的類別，並說明選擇理由。
-
-分類結果："""
+        classification categories:
+        """
     )
     
     # Initialize dataset processor with custom template
@@ -100,7 +99,7 @@ def main():
         "learning_rate": 2e-4,
         "weight_decay": 0.01,
         "logging_steps": 10,
-        "eval_strategy": "epoch",  # Changed from evaluation_strategy
+        "eval_strategy": "epoch", 
         "save_strategy": "epoch",
         "save_total_limit": 2,
         "load_best_model_at_end": True,

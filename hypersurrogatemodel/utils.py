@@ -21,9 +21,129 @@ from contextlib import contextmanager
 import psutil
 import GPUtil
 
-# Set up logging
-logger = logging.getLogger(__name__)
+class ColoredFormatter(logging.Formatter):
+    """
+    Custom formatter to add colors to log messages.
+    """
+    
+    # ANSI color codes
+    COLORS = {
+        'DEBUG': '\033[36m',      # Cyan
+        'INFO': '\033[32m',       # Green
+        'WARNING': '\033[33m',    # Yellow
+        'ERROR': '\033[31m',      # Red
+        'CRITICAL': '\033[35m',   # Magenta
+        'RESET': '\033[0m'        # Reset
+    }
+    
+    def __init__(self, pattern, use_colors=True):
+        super().__init__(pattern)
+        self.use_colors = use_colors
+    
+    def format(self, record):
+        if self.use_colors:
+            # Add color to level name
+            levelname = record.levelname
+            if levelname in self.COLORS:
+                colored_levelname = f"{self.COLORS[levelname]}{levelname}{self.COLORS['RESET']}"
+                record.levelname = colored_levelname
+        
+        return super().format(record)
 
+class Logger:
+    """
+    Enhanced logger with file and console output, supporting colored output.
+    """
+    
+    def __init__(
+        self, 
+        name: str = "enhanced_llm", 
+        log_dir: str = "./logs",
+        level: str = "INFO",
+        use_colors: bool = True
+    ):
+        """
+        Initialize logger.
+        
+        Args:
+            name: Logger name
+            log_dir: Directory for log files
+            level: Logging level
+            use_colors: Enable colored console output
+        """
+        self.log_dir = Path(log_dir)
+        self.log_dir.mkdir(parents=True, exist_ok=True)
+        self.use_colors = use_colors
+        self.function = "main"
+        
+        self.logger = logging.getLogger(name)
+        self.logger.setLevel(getattr(logging, level.upper()))
+        
+        self.logger.propagate = False
+        self.logger.handlers = []
+        
+        console_handler = logging.StreamHandler()
+        console_formatter = ColoredFormatter(
+            '%(levelname)s - %(name)s - %(function)s - %(message)s',
+            use_colors=use_colors
+        )
+        console_handler.setFormatter(console_formatter)
+        self.logger.addHandler(console_handler)
+        
+        log_file = self.log_dir / f"{name}_{datetime.now().strftime('%Y%m%d')}.log"
+        file_handler = logging.FileHandler(log_file)
+        file_formatter = logging.Formatter(
+            '%(asctime)s - %(levelname)s - %(name)s - %(function)s - %(filename)s:%(lineno)d - %(message)s'
+        )
+        file_handler.setFormatter(file_formatter)
+        self.logger.addHandler(file_handler)
+    
+    def _log_with_function(self, level, message):
+        """Internal method to add function name to log record."""
+        record = self.logger.makeRecord(
+            self.logger.name, level, __file__, 0, message, (), None
+        )
+        record.function = self.function
+        if self.logger.isEnabledFor(level):
+            self.logger.handle(record)
+    
+    def info(self, message: str) -> None:
+        """Log info message."""
+        self._log_with_function(logging.INFO, message)
+    
+    def warning(self, message: str) -> None:
+        """Log warning message."""
+        self._log_with_function(logging.WARNING, message)
+    
+    def error(self, message: str) -> None:
+        """Log error message."""
+        self._log_with_function(logging.ERROR, message)
+    
+    def debug(self, message: str) -> None:
+        """Log debug message."""
+        self._log_with_function(logging.DEBUG, message)
+    
+    def critical(self, message: str) -> None:
+        """Log critical message."""
+        self._log_with_function(logging.CRITICAL, message)
+    
+    def success(self, message: str) -> None:
+        """Log success message (using info level with green color)."""
+        self._log_with_function(logging.INFO, f"✅ {message}")
+    
+    def step(self, message: str) -> None:
+        """Log step message (using info level with special formatting)."""
+        self._log_with_function(logging.INFO, f"🔄 {message}")
+    
+    def result(self, message: str) -> None:
+        """Log result message (using info level with special formatting)."""
+        self._log_with_function(logging.INFO, f"📊 {message}")
+        
+    def setFunctionsLevel(self, functionName = 'main') -> None:
+        """Set the current function name for logging context."""
+        self.function = functionName
+    
+logger = Logger("utils")
 
 def set_random_seed(seed: int = 42) -> None:
     """
@@ -32,6 +152,7 @@ def set_random_seed(seed: int = 42) -> None:
     Args:
         seed: Random seed value
     """
+
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -42,7 +163,7 @@ def set_random_seed(seed: int = 42) -> None:
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
     
-    logger.info(f"Random seed set to {seed}")
+    logger.debug(f"Random seed set to {seed}")
 
 
 def get_device(prefer_gpu: bool = True) -> torch.device:
@@ -58,13 +179,13 @@ def get_device(prefer_gpu: bool = True) -> torch.device:
     if prefer_gpu:
         if torch.cuda.is_available():
             device = torch.device("cuda")
-            logger.info(f"Using CUDA device: {torch.cuda.get_device_name()}")
+            logger.debug(f"Using CUDA device: {torch.cuda.get_device_name()}")
         elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
             device = torch.device("mps")
-            logger.info("Using MPS device (Apple Silicon)")
+            logger.debug("Using MPS device (Apple Silicon)")
         else:
             device = torch.device("cpu")
-            logger.info("Using CPU device")
+            logger.debug("Using CPU device")
     else:
         device = torch.device("cpu")
         logger.info("Using CPU device (as requested)")
@@ -557,114 +678,4 @@ class ConfigManager:
         self.configs[name] = config
 
 
-class ColoredFormatter(logging.Formatter):
-    """
-    Custom formatter to add colors to log messages.
-    """
-    
-    # ANSI color codes
-    COLORS = {
-        'DEBUG': '\033[36m',      # Cyan
-        'INFO': '\033[32m',       # Green
-        'WARNING': '\033[33m',    # Yellow
-        'ERROR': '\033[31m',      # Red
-        'CRITICAL': '\033[35m',   # Magenta
-        'RESET': '\033[0m'        # Reset
-    }
-    
-    def __init__(self, pattern, use_colors=True):
-        super().__init__(pattern)
-        self.use_colors = use_colors
-    
-    def format(self, record):
-        if self.use_colors:
-            # Add color to level name
-            levelname = record.levelname
-            if levelname in self.COLORS:
-                colored_levelname = f"{self.COLORS[levelname]}{levelname}{self.COLORS['RESET']}"
-                record.levelname = colored_levelname
-        
-        return super().format(record)
 
-
-class Logger:
-    """
-    Enhanced logger with file and console output, supporting colored output.
-    """
-    
-    def __init__(
-        self, 
-        name: str = "enhanced_llm", 
-        log_dir: str = "./logs",
-        level: str = "INFO",
-        use_colors: bool = True
-    ):
-        """
-        Initialize logger.
-        
-        Args:
-            name: Logger name
-            log_dir: Directory for log files
-            level: Logging level
-            use_colors: Enable colored console output
-        """
-        self.log_dir = Path(log_dir)
-        self.log_dir.mkdir(parents=True, exist_ok=True)
-        self.use_colors = use_colors
-        
-        # Create logger
-        self.logger = logging.getLogger(name)
-        self.logger.setLevel(getattr(logging, level.upper()))
-        
-        # Clear existing handlers
-        self.logger.handlers = []
-        
-        # Console handler with colors
-        console_handler = logging.StreamHandler()
-        console_formatter = ColoredFormatter(
-            '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-            use_colors=use_colors
-        )
-        console_handler.setFormatter(console_formatter)
-        self.logger.addHandler(console_handler)
-        
-        # File handler (no colors for file output)
-        log_file = self.log_dir / f"{name}_{datetime.now().strftime('%Y%m%d')}.log"
-        file_handler = logging.FileHandler(log_file)
-        file_formatter = logging.Formatter(
-            '%(asctime)s - %(name)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s'
-        )
-        file_handler.setFormatter(file_formatter)
-        self.logger.addHandler(file_handler)
-    
-    def info(self, message: str) -> None:
-        """Log info message."""
-        self.logger.info(message)
-    
-    def warning(self, message: str) -> None:
-        """Log warning message."""
-        self.logger.warning(message)
-    
-    def error(self, message: str) -> None:
-        """Log error message."""
-        self.logger.error(message)
-    
-    def debug(self, message: str) -> None:
-        """Log debug message."""
-        self.logger.debug(message)
-    
-    def critical(self, message: str) -> None:
-        """Log critical message."""
-        self.logger.critical(message)
-    
-    def success(self, message: str) -> None:
-        """Log success message (using info level with green color)."""
-        self.info(f"✅ {message}")
-    
-    def step(self, message: str) -> None:
-        """Log step message (using info level with special formatting)."""
-        self.info(f"🔄 {message}")
-    
-    def result(self, message: str) -> None:
-        """Log result message (using info level with special formatting)."""
-        self.info(f"📊 {message}")

@@ -24,7 +24,7 @@ import wandb
 from tqdm import tqdm
 from torch.utils.data import DataLoader
 
-from .model import EnhancedLLMModel, TextGenerationModel
+from .model import TrainableLLM, TextGenerationModel
 from .dataset import DomainDatasetProcessor
 
 # Set up logging
@@ -110,7 +110,7 @@ class ClassificationTrainer:
     
     def __init__(
         self,
-        model: EnhancedLLMModel,
+        model: TrainableLLM,
         tokenizer,
         output_dir: str = "./results",
         use_wandb: bool = False,
@@ -556,9 +556,8 @@ class TrainingManager:
         """
         # Initialize model
         model_config = model_config or {}
-        model = EnhancedLLMModel(
+        model = TrainableLLM(
             base_model_name=self.base_model_name,
-            num_classes=num_classes,
             **model_config
         )
         

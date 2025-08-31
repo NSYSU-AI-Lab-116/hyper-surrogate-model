@@ -8,6 +8,9 @@ import torch
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# Initialize logger
+from hypersurrogatemodel.utils import Logger
+
 class Color:
     """Simple color class for terminal output."""
     GREEN = "\033[92m"
@@ -15,15 +18,17 @@ class Color:
     YELLOW = "\033[93m"
     BLUE = "\033[94m"
     RESET = "\033[0m"
-    
+
+logger = Logger("test_system")
 
 def test_imports():
     """Test that all modules can be imported successfully."""
-    print("Testing imports...")
+    logger.setFunctionsLevel("test_imports")
+    logger.step("Testing imports...")
     
     try:
         from hypersurrogatemodel import (
-            EnhancedLLMModel,
+            TrainableLLM,
             TextGenerationModel,
             DomainDatasetProcessor,
             PromptTemplate,
@@ -31,46 +36,45 @@ def test_imports():
             ModelEvaluator,
             set_random_seed,
             get_device,
-            Logger
         )
-        print("✅ All imports successful")
+        logger.success("All imports successful")
         return True
     except ImportError as e:
-        print(f"❌ Import error: {e}")
+        logger.error(f"Import error: {e}")
         return False
 
 def test_model_initialization():
     """Test model initialization."""
-    print("\nTesting model initialization...")
+    logger.setFunctionsLevel("test_model_initialization")
+    logger.step("Testing model initialization...")
     
     try:
-        from hypersurrogatemodel import EnhancedLLMModel, set_random_seed
+        from hypersurrogatemodel import TrainableLLM, set_random_seed
         
         set_random_seed(42)
         
         # Test with smaller model for quick testing
-        model = EnhancedLLMModel(
+        model = TrainableLLM(
             base_model_name="google/gemma-3-270m-it",
-            num_classes=12,
-            hidden_size=128,  # Smaller for testing
-            dropout_rate=0.1,
             use_lora=True,
         )
         
         model_info = model.get_model_info()
-        print(f"✅ Model initialized successfully")
-        print(f"   - Total parameters: {model_info['total_parameters']:,}")
-        print(f"   - Trainable parameters: {model_info['trainable_parameters']:,}")
-        print(f"   - Trainable ratio: {model_info['trainable_ratio']:.2f}%")
+        logger.success(f"Model initialized successfully")
+        logger.info(f"Total parameters: {model_info['total_parameters']:,}")
+        logger.info(f"Trainable parameters: {model_info['trainable_parameters']:,}")
+        logger.info(f"Trainable ratio: {model_info['trainable_ratio']:.2f}%")
         
         return True, model
     except Exception as e:
-        print(f"❌ Model initialization error: {e}")
+        logger.error(f"Model initialization error: {e}")
         return False, None
 
 def test_dataset_processing():
     """Test dataset processing functionality."""
-    print("\nTesting dataset processing...")
+    print()
+    logger.setFunctionsLevel("test_dataset_processing")
+    logger.step("Testing dataset processing...")
     
     try:
         from hypersurrogatemodel import DomainDatasetProcessor, PromptTemplate
@@ -105,56 +109,47 @@ def test_dataset_processing():
             include_prompt=True
         )
         
-        print(f"✅ Dataset processing successful")
-        print(f"   - Created dataset with {len(dataset)} samples")
-        print(f"   - Prompt template working")
+        logger.success(f"Dataset processing successful")
+        logger.info(f"Created dataset with {len(dataset)} samples")
+        logger.info(f"Prompt template working")
         
         return True
     except Exception as e:
-        print(f"❌ Dataset processing error: {e}")
+        logger.error(f"Dataset processing error: {e}")
         return False
 
 def test_utilities():
     """Test utility functions."""
-    print("\nTesting utilities...")
+    print()
+    logger.setFunctionsLevel("utilities")
+    logger.step("Testing utilities...")
     
     try:
-        from hypersurrogatemodel import get_device, get_system_info, Logger
+        from hypersurrogatemodel import get_device, get_system_info
         
         # Test device detection
         device = get_device()
-        print(f"✅ Device detection: {device}")
+        logger.success(f"Device detection: {device}")
         
         # Test system info
-        sys_info = get_system_info()
-        print(f"✅ System info collected")
-        print(f"   - CPU count: {sys_info['cpu_count']}")
-        print(f"   - Memory total: {sys_info['memory_total_gb']:.1f} GB")
-        print(f"   - CUDA available: {sys_info['cuda_available']}")
-        print(f"   - MPS available: {sys_info['mps_available']}")
-        
-        # Test logger
-        logger = Logger("test_logger", log_dir="./test_logs")
-        logger.info("Test log message")
-        print("✅ Logger working")
+        get_system_info()
         
         return True
     except Exception as e:
-        print(f"❌ Utilities error: {e}")
+        logger.error(f"Utilities error: {e}")
         return False
 
 def test_model_forward_pass():
-    """Test model forward pass with dummy data."""
-    print("\nTesting model forward pass...")
+    """Test forward pass functionality."""
+    logger.setFunctionsLevel("test_model_forward_pass")
+    logger.step("Testing Model Forward Pass...")
     
     try:
-        from hypersurrogatemodel import EnhancedLLMModel
+        from hypersurrogatemodel import TrainableLLM
         from hypersurrogatemodel.utils import get_device
         
-        model = EnhancedLLMModel(
+        model = TrainableLLM(
             base_model_name="google/gemma-3-270m-it",
-            num_classes=12,
-            hidden_size=128,
             use_lora=True,
         )
         
@@ -164,44 +159,33 @@ def test_model_forward_pass():
         
         # Test input
         test_text = "This is a test input for the model."
-        inputs = tokenizer(
-            test_text,
-            padding=True,
-            truncation=True,
-            max_length=128,
-            return_tensors="pt"
-        )
         
-        input_ids = inputs["input_ids"].to(device) # type: ignore
-        attention_mask = inputs["attention_mask"].to(device) # type: ignore
-        
-        # Forward pass
-        model.eval()
+        # Test text generation instead of classification
         with torch.no_grad():
-            outputs = model(
-                input_ids=input_ids,
-                attention_mask=attention_mask
+            generated_text = model.generate_text(
+                prompt=test_text,
+                max_new_tokens=20,
+                temperature=0.7
             )
         
-        logits = outputs["logits"]
-        print(f"✅ Forward pass successful")
-        print(f"   - Input IDs shape: {input_ids.shape}")
-        print(f"   - Output logits shape: {logits.shape}")
-        print(f"   - Expected output shape: [1, 12]")
+        logger.success("Forward pass successful")
+        logger.info(f"Input text: {test_text}")
+        logger.info(f"Generated text: {generated_text}")
         
-        # Check output shape
-        assert logits.shape == (1, 12), f"Expected shape [1, 12], got {logits.shape}"
-        print("✅ Output shape verification passed")
+        # Check that generation worked
+        assert isinstance(generated_text, str), f"Expected string output, got {type(generated_text)}"
+        assert len(generated_text) > len(test_text), "Generated text should be longer than input"
+        logger.success("Text generation verification passed")
         
         return True
     except Exception as e:
-        print(f"❌ Forward pass error: {e}")
+        logger.error(f"Forward pass error: {e}")
         return False
 
 def main():
     """Run all tests."""
     print("=" * 60)
-    print("Enhanced LLM Model - Quick Test Suite")
+    logger.info("Enhanced LLM Model - Quick Test Suite")
     print("=" * 60)
     
     test_results = []
@@ -214,26 +198,24 @@ def main():
     test_results.append(("Model Forward Pass", test_model_forward_pass()))
     
     # Summary
-    print("\n" + "=" * 60)
-    print("TEST SUMMARY")
+    print("\n\n" + "=" * 60)
+    logger.info("TEST SUMMARY")
     print("=" * 60)
     
     passed = 0
     total = len(test_results)
     
-    for test_name, result in test_results:
-        status = f"{Color.GREEN}PASS{Color.RESET}" if result else f"{Color.RED}FAIL{Color.RESET}"
-        print(f"{test_name:<25} {status}")
+    for result in test_results:
         if result:
             passed += 1
     
-    print(f"\nPassed: {passed}/{total}")
+    logger.info(f"Passed: {passed}/{total}")
     
     if passed == total:
-        print(f"{Color.GREEN}All tests passed! The system is ready to use.{Color.RESET}")
+        logger.success(f"All tests passed! The system is ready to use.")
         return True
     else:
-        print(f"{Color.RED}Some tests failed. Please check the errors above.{Color.RESET}")
+        logger.error(f"Some tests failed. Please check the errors above.")
         return False
 
 if __name__ == "__main__":

@@ -28,7 +28,7 @@ import logging
 from datetime import datetime
 from collections import defaultdict
 
-from .model import EnhancedLLMModel, TextGenerationModel
+from .model import TrainableLLM, TextGenerationModel
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -152,7 +152,7 @@ class ModelEvaluator:
     
     def __init__(
         self,
-        model: Union[EnhancedLLMModel, TextGenerationModel],
+        model: Union[TrainableLLM, TextGenerationModel],
         tokenizer,
         class_names: Optional[List[str]] = None,
     ):
@@ -850,7 +850,7 @@ class ModelDiagnostics:
     Diagnostic tools for model analysis and debugging.
     """
     
-    def __init__(self, model: Union[EnhancedLLMModel, TextGenerationModel]):
+    def __init__(self, model: Union[TrainableLLM, TextGenerationModel]):
         """
         Initialize diagnostics.
         

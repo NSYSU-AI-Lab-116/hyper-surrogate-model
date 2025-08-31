@@ -1,11 +1,11 @@
 """
-Enhanced LLM Model Package
+Trainable Language Model Package
 
-A comprehensive package for training and deploying enhanced language models
-with classification capabilities using LoRA fine-tuning.
+A comprehensive package for training and deploying language models
+with LoRA fine-tuning support.
 """
 
-from .model import EnhancedLLMModel, TextGenerationModel
+from .model import TrainableLLM, TextGenerationModel
 from .dataset import DomainDatasetProcessor, PromptTemplate, DatasetAugmentor
 from .trainer import (
     ClassificationTrainer, 
@@ -33,15 +33,12 @@ from .utils import (
 
 __version__ = "1.0.0"
 __author__ = "Enhanced LLM Team"
-__description__ = "Enhanced LLM Model with Classification Capabilities"
+__description__ = "Trainable Language Model with LoRA Support"
 
 # Default configuration
 DEFAULT_CONFIG = {
     "model": {
         "base_model_name": "google/gemma-3-270m-it",
-        "num_classes": 12,
-        "hidden_size": 256,
-        "dropout_rate": 0.1,
         "use_lora": True,
     },
     "training": {
@@ -66,7 +63,7 @@ DEFAULT_CONFIG = {
 
 __all__ = [
     # Model classes
-    "EnhancedLLMModel",
+    "TrainableLLM",
     "TextGenerationModel",
     
     # Dataset processing

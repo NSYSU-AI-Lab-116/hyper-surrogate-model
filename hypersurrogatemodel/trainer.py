@@ -17,7 +17,6 @@ from transformers import (
 from datasets import Dataset, DatasetDict
 import numpy as np
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support, classification_report
-import logging
 from pathlib import Path
 import json
 import wandb
@@ -26,10 +25,10 @@ from torch.utils.data import DataLoader
 
 from .model import TrainableLLM, TextGenerationModel
 from .dataset import DomainDatasetProcessor
+from .utils import Logger
 
-# Set up logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Set up logger using utils.Logger
+logger = Logger("trainer")
 
 
 class TrainingMetrics:
@@ -115,6 +114,7 @@ class ClassificationTrainer:
         output_dir: str = "./results",
         use_wandb: bool = False,
         wandb_project: str = "enhanced-llm-classification",
+        save_files: bool = True,
     ):
         """
         Initialize the classification trainer.
@@ -128,8 +128,10 @@ class ClassificationTrainer:
         """
         self.model = model
         self.tokenizer = tokenizer
+        self.save_files = save_files
         self.output_dir = Path(output_dir)
-        self.output_dir.mkdir(parents=True, exist_ok=True)
+        if self.save_files:
+            self.output_dir.mkdir(parents=True, exist_ok=True)
         
         self.use_wandb = use_wandb
         if use_wandb:
@@ -320,6 +322,7 @@ class GenerationTrainer:
         output_dir: str = "./results",
         use_wandb: bool = False,
         wandb_project: str = "enhanced-llm-generation",
+        save_files: bool = True,
     ):
         """
         Initialize the generation trainer.
@@ -330,11 +333,14 @@ class GenerationTrainer:
             output_dir: Directory to save training outputs
             use_wandb: Whether to use Weights & Biases for logging
             wandb_project: W&B project name
+            save_files: Whether to save intermediate files
         """
         self.model = model
         self.tokenizer = tokenizer
+        self.save_files = save_files
         self.output_dir = Path(output_dir)
-        self.output_dir.mkdir(parents=True, exist_ok=True)
+        if self.save_files:
+            self.output_dir.mkdir(parents=True, exist_ok=True)
         
         self.use_wandb = use_wandb
         if use_wandb:

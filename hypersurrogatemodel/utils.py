@@ -139,7 +139,7 @@ class Logger:
         """Log result message (using info level with special formatting)."""
         self._log_with_function(logging.INFO, f"📊 {message}")
         
-    def setFunctionsLevel(self, functionName = 'main') -> None:
+    def setFunctionsName(self, functionName = 'main') -> None:
         """Set the current function name for logging context."""
         self.function = functionName
     

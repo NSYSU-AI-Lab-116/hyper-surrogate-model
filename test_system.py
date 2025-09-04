@@ -5,25 +5,14 @@ AI generated test script for the Enhanced LLM Model system.
 import sys
 import os
 import torch
-
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-# Initialize logger
 from hypersurrogatemodel.utils import Logger
-
-class Color:
-    """Simple color class for terminal output."""
-    GREEN = "\033[92m"
-    RED = "\033[91m"
-    YELLOW = "\033[93m"
-    BLUE = "\033[94m"
-    RESET = "\033[0m"
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 logger = Logger("test_system")
 
 def test_imports():
     """Test that all modules can be imported successfully."""
-    logger.setFunctionsLevel("test_imports")
+    logger.setFunctionsName("test_imports")
     logger.step("Testing imports...")
     
     try:
@@ -45,7 +34,7 @@ def test_imports():
 
 def test_model_initialization():
     """Test model initialization."""
-    logger.setFunctionsLevel("test_model_initialization")
+    logger.setFunctionsName("test_model_initialization")
     logger.step("Testing model initialization...")
     
     try:
@@ -73,7 +62,7 @@ def test_model_initialization():
 def test_dataset_processing():
     """Test dataset processing functionality."""
     print()
-    logger.setFunctionsLevel("test_dataset_processing")
+    logger.setFunctionsName("test_dataset_processing")
     logger.step("Testing dataset processing...")
     
     try:
@@ -121,7 +110,7 @@ def test_dataset_processing():
 def test_utilities():
     """Test utility functions."""
     print()
-    logger.setFunctionsLevel("utilities")
+    logger.setFunctionsName("utilities")
     logger.step("Testing utilities...")
     
     try:
@@ -141,7 +130,7 @@ def test_utilities():
 
 def test_model_forward_pass():
     """Test forward pass functionality."""
-    logger.setFunctionsLevel("test_model_forward_pass")
+    logger.setFunctionsName("test_model_forward_pass")
     logger.step("Testing Model Forward Pass...")
     
     try:

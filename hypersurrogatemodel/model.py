@@ -14,10 +14,11 @@ from transformers import (
     PreTrainedTokenizer,
 )
 from peft import LoraConfig, get_peft_model, TaskType
-import logging
 
-# Set up logging
-logger = logging.getLogger(__name__)
+from .utils import Logger
+
+# Set up logger using utils.Logger
+logger = Logger("model")
 
 
 class TrainableLLM(nn.Module):
@@ -51,8 +52,10 @@ class TrainableLLM(nn.Module):
         self.model = AutoModelForCausalLM.from_pretrained(
             base_model_name,
             torch_dtype=torch.float32,
-            device_map="auto",
+            device_map=None,  # Don't use auto device mapping on MPS
         )
+        # Move to CPU to avoid MPS issues
+        self.model = self.model.to("cpu") # type: ignore
         
         if use_lora:
             self._setup_lora(lora_config)
@@ -98,6 +101,7 @@ class TrainableLLM(nn.Module):
     def generate_text(
         self,
         prompt: str,
+        template: str = """structured""",
         max_new_tokens: int = 100,
         temperature: float = 0.7,
         do_sample: bool = True,
@@ -121,7 +125,13 @@ class TrainableLLM(nn.Module):
         # Move inputs to the same device as the model
         device = next(self.model.parameters()).device
         inputs = inputs.to(device)
-        
+        prompt = """Generate a structured response in JSON format:
+                    Input: "Analyze the weather in Tokyo"
+                    Output format: {"location": "", "analysis": "", "temperature": "", "conditions": ""}
+
+                    Input: "{your_input}"
+                    Output:
+                """
         with torch.no_grad():
             outputs = self.model.generate(
                 inputs,

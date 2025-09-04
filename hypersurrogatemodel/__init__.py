@@ -6,7 +6,7 @@ with LoRA fine-tuning support.
 """
 
 from .model import TrainableLLM, TextGenerationModel
-from .dataset import DomainDatasetProcessor, PromptTemplate, DatasetAugmentor
+from .dataset import DomainDatasetProcessor, PromptTemplate
 from .trainer import (
     ClassificationTrainer, 
     GenerationTrainer, 
@@ -20,6 +20,7 @@ from .evaluator import (
     FeedbackCollector,
     ModelDiagnostics
 )
+from .comparison_tuner import ComparisonTuner
 from .utils import (
     set_random_seed,
     get_device,
@@ -69,7 +70,6 @@ __all__ = [
     # Dataset processing
     "DomainDatasetProcessor",
     "PromptTemplate", 
-    "DatasetAugmentor",
     
     # Training
     "ClassificationTrainer",
@@ -83,6 +83,9 @@ __all__ = [
     "PerformanceMonitor",
     "FeedbackCollector", 
     "ModelDiagnostics",
+    
+    # Comparison and Tuning
+    "ComparisonTuner",
     
     # Utilities
     "set_random_seed",

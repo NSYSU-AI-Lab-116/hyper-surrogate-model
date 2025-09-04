@@ -24,15 +24,14 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
 import json
-import logging
 from datetime import datetime
 from collections import defaultdict
 
 from .model import TrainableLLM, TextGenerationModel
+from .utils import Logger
 
-# Set up logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Set up logger using utils.Logger
+logger = Logger("evaluator")
 
 
 class PerformanceMonitor:

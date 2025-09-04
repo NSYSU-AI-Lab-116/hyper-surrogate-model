@@ -12,11 +12,11 @@ from datasets import Dataset, DatasetDict
 from transformers import PreTrainedTokenizer
 import pandas as pd
 from pathlib import Path
-import logging
 
-# Set up logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+from .utils import Logger
+
+# Set up logger using utils.Logger
+logger = Logger("dataset")
 
 
 class PromptTemplate:
@@ -27,7 +27,7 @@ class PromptTemplate:
     the LLM better understand and process domain-specific information.
     """
     
-    def __init__(self, template_type: str = "classification"):
+    def __init__(self, template_type: str = "structured"):
         """
         Initialize prompt template.
         
@@ -44,6 +44,14 @@ class PromptTemplate:
                 """
                     Please analys the below data and choose the most suitable surrogate model combination for training its archtechture within its domain.
                     {text}
+                """,
+            "structured":
+                """
+                    Please analys the below data and choose the most suitable surrogate model combination for training its archtechture within its domain.
+                    {text}
+                    and output within a structured format as JSON as follows:
+                    {"index":double}
+                    
                 """
         }
         return templates
@@ -349,77 +357,3 @@ class DomainDatasetProcessor:
         
         logger.info(f"Dataset exported to {output_path}")
 
-
-class DatasetAugmentor:
-    """
-    Dataset augmentation utilities for improving model robustness.
-    """
-    
-    def __init__(self, tokenizer: PreTrainedTokenizer):
-        """
-        Initialize the augmentor.
-        
-        Args:
-            tokenizer: Tokenizer for text processing
-        """
-        self.tokenizer = tokenizer
-    
-    def augment_by_paraphrasing(
-        self,
-        texts: List[str],
-        paraphrase_templates: List[str],
-    ) -> List[str]:
-        """
-        Augment texts by applying paraphrase templates.
-        
-        Args:
-            texts: Original texts
-            paraphrase_templates: Templates for paraphrasing
-            
-        Returns:
-            Augmented texts
-        """
-        augmented = []
-        for text in texts:
-            for template in paraphrase_templates:
-                augmented.append(template.format(text=text))
-        return augmented
-    
-    def augment_by_noise(
-        self,
-        texts: List[str],
-        noise_ratio: float = 0.1,
-        noise_types: List[str] = ["mask", "substitute"],
-    ) -> List[str]:
-        """
-        Add noise to texts for robustness training.
-        
-        Args:
-            texts: Original texts
-            noise_ratio: Ratio of tokens to modify
-            noise_types: Types of noise to apply
-            
-        Returns:
-            Noisy texts
-        """
-        # This is a simplified implementation
-        # In practice, you might want to use more sophisticated methods
-        augmented = []
-        for text in texts:
-            tokens = self.tokenizer.tokenize(text)
-            num_noise = int(len(tokens) * noise_ratio)
-            
-            if "mask" in noise_types and num_noise > 0:
-                # Replace some tokens with mask token
-                noisy_tokens = tokens.copy()
-                import random
-                positions = random.sample(range(len(tokens)), min(num_noise, len(tokens)))
-                for pos in positions:
-                    mask_token = self.tokenizer.mask_token or "[MASK]"
-                    # Ensure mask_token is a string
-                    if isinstance(mask_token, list):
-                        mask_token = mask_token[0] if mask_token else "[MASK]"
-                    noisy_tokens[pos] = str(mask_token)
-                augmented.append(self.tokenizer.convert_tokens_to_string(noisy_tokens))
-        
-        return augmented

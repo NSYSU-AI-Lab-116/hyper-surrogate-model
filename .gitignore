@@ -13,3 +13,4 @@ experiments/
 # manual
 *.log
 wandb/
+.DS_Store

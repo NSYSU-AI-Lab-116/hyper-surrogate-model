@@ -223,16 +223,16 @@ class DomainDatasetProcessor:
             Tokenized dataset
         """
         def tokenize_function(examples):
-            # Tokenize texts
+            # 確保 tokenization 包含 attention_mask
             tokenized = self.tokenizer(
                 examples[text_column],
-                padding="max_length",  # Use max_length padding to avoid warning
+                padding=padding,
                 truncation=truncation,
                 max_length=self.max_length,
-                return_tensors=None,
+                return_attention_mask=True,  # 明確返回 attention mask
+                return_tensors=None  # 保持為 Python 列表格式
             )
             
-            # Add labels if present
             if label_column and label_column in examples:
                 tokenized["labels"] = examples[label_column]
             

@@ -120,63 +120,7 @@ def quick_start():
     logger.info("結果文件保存在: ./tuning_results/")
     logger.success("快速開始完成!")
 
-def test_your_own_dataset():
-    """測試您自己的數據集"""
-    
-    logger.info("=" * 50)
-    logger.info("💡 使用您自己的數據集")
-    logger.info("=" * 50)
-    
-    logger.info("""
-要使用您自己的數據集，請按照以下格式準備JSON文件：
 
-{
-  "data": [
-    {
-      "text": "您的輸入文本",
-      "answer": "期望的答案"
-    },
-    {
-      "text": "另一個輸入文本", 
-      "answer": "另一個期望答案"
-    }
-  ]
-}
-
-然後修改以下代碼中的參數：
-
-```python
-# 載入您的數據集
-comparison_results = tuner.load_and_compare_dataset(
-    dataset_path="您的數據集路徑.json",
-    text_column="text",      # 您的輸入文本欄位名
-    answer_column="answer",   # 您的答案欄位名
-    task_type="generation",   # 或 "classification"
-    comparison_method="similarity"  # 或 "exact_match", "structured"
-)
-
-# 進行調優
-tuning_results = tuner.adaptive_tuning(
-    comparison_results=comparison_results,
-    dataset_path="您的數據集路徑.json",
-    text_column="text",
-    answer_column="answer",
-    tuning_strategy="error_focused",  # 或 "full_retrain", "incremental"
-    max_epochs=3,
-    learning_rate=2e-5,
-)
-```
-
-調優策略說明：
-- error_focused: 只使用錯誤樣本進行訓練（推薦）
-- incremental: 使用錯誤樣本 + 部分正確樣本
-- full_retrain: 使用全部數據重新訓練
-
-比對方法說明：
-- exact_match: 完全匹配
-- similarity: 基於相似度比對（推薦用於文本生成）
-- structured: 結構化比對（用於JSON等格式化輸出）
-    """)
 
 if __name__ == "__main__":
     quick_start()

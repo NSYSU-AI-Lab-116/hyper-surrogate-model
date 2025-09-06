@@ -17,8 +17,6 @@ from .trainer import (
 from .evaluator import (
     ModelEvaluator, 
     PerformanceMonitor, 
-    FeedbackCollector,
-    ModelDiagnostics
 )
 from .comparison_tuner import ComparisonTuner
 from .utils import (
@@ -81,8 +79,6 @@ __all__ = [
     # Evaluation
     "ModelEvaluator",
     "PerformanceMonitor",
-    "FeedbackCollector", 
-    "ModelDiagnostics",
     
     # Comparison and Tuning
     "ComparisonTuner",

@@ -113,7 +113,7 @@ class ClassificationTrainer:
         tokenizer,
         output_dir: str = "./results",
         use_wandb: bool = False,
-        wandb_project: str = "enhanced-llm-classification",
+        wandb_project: str = "hypersurrogatemodel-classification",
         save_files: bool = True,
     ):
         """
@@ -269,7 +269,6 @@ class ClassificationTrainer:
         
         with torch.no_grad():
             for batch in tqdm(dataloader, desc="Evaluating"):
-                # Move to device - get device from model parameters
                 device = next(self.model.parameters()).device
                 batch = {k: v.to(device) for k, v in batch.items() if isinstance(v, torch.Tensor)}
                 
@@ -279,7 +278,7 @@ class ClassificationTrainer:
                     attention_mask=batch["attention_mask"],
                 )
                 
-                # Get predictions
+                # predict
                 logits = outputs["logits"]
                 batch_predictions = torch.argmax(logits, dim=-1).cpu().numpy()
                 batch_labels = batch["labels"].cpu().numpy()
@@ -287,13 +286,12 @@ class ClassificationTrainer:
                 predictions.extend(batch_predictions)
                 true_labels.extend(batch_labels)
         
-        # Compute metrics
+        #metrics
         accuracy = accuracy_score(true_labels, predictions)
         precision, recall, f1, _ = precision_recall_fscore_support(
             true_labels, predictions, average='weighted'
         )
         
-        # Generate classification report
         report = classification_report(
             true_labels, predictions, output_dict=True
         )
@@ -321,7 +319,7 @@ class GenerationTrainer:
         tokenizer,
         output_dir: str = "./results",
         use_wandb: bool = False,
-        wandb_project: str = "enhanced-llm-generation",
+        wandb_project: str = "hypersurrogatemodel-generation",
         save_files: bool = True,
     ):
         """

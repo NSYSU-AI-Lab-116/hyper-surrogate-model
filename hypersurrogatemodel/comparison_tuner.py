@@ -8,12 +8,15 @@ and performing fine-tuning based on the differences.
 import torch
 import numpy as np
 import json
+import psutil
+import gc
 from typing import Dict, Any, List, Optional, Union, Tuple
 from pathlib import Path
 from datasets import Dataset
 from transformers import TrainingArguments, Trainer
 from datetime import datetime
 from collections import defaultdict
+from tqdm import tqdm
 
 from .model import TrainableLLM
 from .dataset import DomainDatasetProcessor, PromptTemplate
@@ -61,12 +64,85 @@ class ComparisonTuner:
         self.evaluator = ModelEvaluator(model, tokenizer)
         self.performance_monitor = PerformanceMonitor(str(self.output_dir / "performance_logs"))
         
+    def _get_memory_usage(self) -> Dict[str, float]:
+        """
+        Get current memory usage information.
+        
+        Returns:
+            Dictionary containing memory usage statistics
+        """
+        # 系統記憶體使用情況
+        memory = psutil.virtual_memory()
+        process = psutil.Process()
+        process_memory = process.memory_info()
+        
+        # GPU 記憶體使用情況（如果有的話）
+        gpu_memory = {}
+        if torch.cuda.is_available():
+            gpu_memory = {
+                'gpu_allocated': torch.cuda.memory_allocated() / 1024**3,  # GB
+                'gpu_reserved': torch.cuda.memory_reserved() / 1024**3,    # GB
+                'gpu_max_allocated': torch.cuda.max_memory_allocated() / 1024**3,  # GB
+            }
+        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            # MPS (Apple Silicon) 記憶體信息
+            gpu_memory = {
+                'mps_allocated': torch.mps.current_allocated_memory() / 1024**3 if hasattr(torch.mps, 'current_allocated_memory') else 0,
+                'mps_driver_allocated': torch.mps.driver_allocated_memory() / 1024**3 if hasattr(torch.mps, 'driver_allocated_memory') else 0,
+            }
+        
+        memory_info = {
+            'system_total': memory.total / 1024**3,        # GB
+            'system_available': memory.available / 1024**3, # GB
+            'system_used': memory.used / 1024**3,          # GB
+            'system_percent': memory.percent,               # %
+            'process_rss': process_memory.rss / 1024**3,    # GB (實際使用)
+            'process_vms': process_memory.vms / 1024**3,    # GB (虛擬記憶體)
+        }
+        
+        memory_info.update(gpu_memory)
+        return memory_info
+        
+    def _log_memory_usage(self, stage: str = "current") -> None:
+        """
+        Log current memory usage with stage information.
+        
+        Args:
+            stage: Description of current processing stage
+        """
+        memory_info = self._get_memory_usage()
+        
+        logger.info(f"=== Memory Usage ({stage}) ===")
+        logger.info(f"System: {memory_info['system_used']:.2f}GB/{memory_info['system_total']:.2f}GB ({memory_info['system_percent']:.1f}%)")
+        logger.info(f"Process: RSS={memory_info['process_rss']:.2f}GB, VMS={memory_info['process_vms']:.2f}GB")
+        
+        if 'gpu_allocated' in memory_info:
+            logger.info(f"GPU: Allocated={memory_info['gpu_allocated']:.2f}GB, Reserved={memory_info['gpu_reserved']:.2f}GB")
+        elif 'mps_allocated' in memory_info:
+            logger.info(f"MPS: Allocated={memory_info['mps_allocated']:.2f}GB, Driver={memory_info['mps_driver_allocated']:.2f}GB")
+        
+        logger.info("=" * 35)
+        
+    def _cleanup_memory(self) -> None:
+        """
+        Perform memory cleanup operations.
+        """
+        # Python garbage collection
+        gc.collect()
+        
+        # PyTorch cache cleanup
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            if hasattr(torch.mps, 'empty_cache'):
+                torch.mps.empty_cache()
+        
     def load_and_compare_dataset(
         self,
         dataset_path: Union[str, Path],
         text_column: str = "text",
         answer_column: str = "answer",
-        task_type: str = "classification",  # "classification" or "generation"
+        task_type: str = "generation",  # "classification" or "generation"
         comparison_method: str = "exact_match",  # "exact_match", "similarity", "structured"
     ) -> Dict[str, Any]:
         """
@@ -83,11 +159,18 @@ class ComparisonTuner:
             Comparison results with differences and metrics
         """
         logger.setFunctionsName("load_and_compare_dataset")
+        
+        # 初始記憶體使用情況
+        self._log_memory_usage("dataset loading start")
+        
         # Load dataset
         dataset = self.dataset_processor.load_dataset_from_file(dataset_path)
         
         logger.info(f"Loaded dataset with {len(dataset)} samples")
         logger.info(f"Columns: {dataset.column_names}")
+        
+        # 載入數據後的記憶體使用情況
+        self._log_memory_usage("after dataset loading")
         
         # Extract texts and ground truth answers
         texts = dataset[text_column]
@@ -96,10 +179,20 @@ class ComparisonTuner:
         # Generate predictions
         predictions = self._generate_predictions(texts, task_type)
         
+        # 生成預測後的記憶體使用情況
+        self._log_memory_usage("after predictions generation")
+        
         # Compare predictions with ground truth
         comparison_results = self._compare_outputs(
             texts, predictions, ground_truth, comparison_method, task_type
         )
+        
+        # 比較完成後的記憶體使用情況
+        self._log_memory_usage("after comparison")
+        
+        # 清理記憶體
+        self._cleanup_memory()
+        self._log_memory_usage("after memory cleanup")
         
         # Save comparison results only if enabled
         if self.save_files:
@@ -127,37 +220,55 @@ class ComparisonTuner:
         predictions = []
         
         logger.info(f"Generating predictions for {len(texts)} samples...")
+        self._log_memory_usage("prediction generation start")
         
-        for i in range(0, len(texts), batch_size):
-            batch_texts = texts[i:i + batch_size]
-            
-            if task_type == "classification":
-                batch_predictions = self._classify_batch(batch_texts)
-            else:  # generation
-                batch_predictions = self._generate_batch(batch_texts)
-            
-            predictions.extend(batch_predictions)
-            
-            if (i // batch_size + 1) % 10 == 0:
-                logger.info(f"Processed {i + len(batch_texts)}/{len(texts)} samples")
+        # 為批次處理添加進度條
+        num_batches = (len(texts) + batch_size - 1) // batch_size
+        with tqdm(total=len(texts), desc="Generating predictions", unit="sample") as pbar:
+            for i in range(0, len(texts), batch_size):
+                batch_texts = texts[i:i + batch_size]
+                
+                if task_type == "classification":
+                    batch_predictions = self._classify_batch(batch_texts)
+                else:  # generation
+                    batch_predictions = self._generate_batch(batch_texts)
+                
+                predictions.extend(batch_predictions)
+                
+                # 更新進度條
+                pbar.update(len(batch_texts))
+                
+                # 獲取當前記憶體使用情況並顯示在進度條中
+                memory_info = self._get_memory_usage()
+                pbar.set_postfix({
+                    'batch': f'{i//batch_size + 1}/{num_batches}',
+                    'completed': f'{len(predictions)}/{len(texts)}',
+                    'memory': f'{memory_info["process_rss"]:.1f}GB'
+                })
+                
+                # 每10個批次清理一次記憶體
+                if (i // batch_size + 1) % 10 == 0:
+                    self._cleanup_memory()
         
+        self._log_memory_usage("prediction generation complete")
         return predictions
     
     def _classify_batch(self, texts: List[str]) -> List[int]:
         """Generate classification predictions for a batch of texts."""
-        # Tokenize
+        # Tokenize with explicit attention mask
         inputs = self.tokenizer(
             texts,
             padding=True,
             truncation=True,
             max_length=512,
             return_tensors="pt",
+            return_attention_mask=True,  # 明確返回 attention mask
         )
         
         with torch.no_grad():
             outputs = self.model(
                 input_ids=inputs["input_ids"],
-                attention_mask=inputs["attention_mask"],
+                attention_mask=inputs["attention_mask"],  # 確保傳遞 attention mask
             )
             
             logits = outputs.logits if hasattr(outputs, 'logits') else outputs[0]
@@ -169,7 +280,13 @@ class ComparisonTuner:
         """Generate text outputs for a batch of texts."""
         predictions = []
         
-        for text in texts:
+        # 如果批次大小較大（超過5個），則顯示內部進度
+        if len(texts) > 5:
+            texts_iter = tqdm(texts, desc="Generating batch", unit="text", leave=False)
+        else:
+            texts_iter = texts
+            
+        for text in texts_iter:
             try:
                 generated = self.model.generate_text(
                     prompt=text,
@@ -208,31 +325,56 @@ class ComparisonTuner:
         differences = []
         matches = []
         similarity_scores = []
+        MATCH_THRESHOLD = 0.8  # similarity-based matching th
         
-        for i, (text, pred, gt) in enumerate(zip(texts, predictions, ground_truth)):
-            if comparison_method == "exact_match":
-                is_match = pred == gt
-                similarity = 1.0 if is_match else 0.0
-            elif comparison_method == "similarity":
-                similarity = self._calculate_similarity(pred, gt)
-                is_match = similarity > 0.8  # Threshold for considering a match
-            elif comparison_method == "structured":
-                similarity, is_match = self._structured_comparison(pred, gt)
-            else:
-                raise ValueError(f"Unknown comparison method: {comparison_method}")
-            
-            matches.append(is_match)
-            similarity_scores.append(similarity)
-            
-            if not is_match:
-                differences.append({
-                    "index": i,
-                    "input_text": text,
-                    "prediction": pred,
-                    "ground_truth": gt,
-                    "similarity": similarity,
-                    "difference_type": self._categorize_difference(pred, gt, task_type)
-                })
+        # 為數據比較添加進度條
+        logger.info(f"Comparing {len(texts)} predictions with ground truth...")
+        self._log_memory_usage("comparison start")
+        
+        with tqdm(total=len(texts), desc="Comparing outputs", unit="comparison") as pbar:
+            for i, (text, pred, gt) in enumerate(zip(texts, predictions, ground_truth)):
+                if comparison_method == "exact_match":
+                    is_match = pred == gt
+                    similarity = 1.0 if is_match else 0.0
+                elif comparison_method == "similarity":
+                    similarity = self._calculate_similarity(pred, gt)
+                    is_match = similarity > MATCH_THRESHOLD
+                elif comparison_method == "structured":
+                    similarity, is_match = self._structured_comparison(pred, gt)
+                else:
+                    raise ValueError(f"Unknown comparison method: {comparison_method}")
+                
+                matches.append(is_match)
+                similarity_scores.append(similarity)
+                
+                if not is_match:
+                    differences.append({
+                        "index": i,
+                        "input_text": text,
+                        "prediction": pred,
+                        "ground_truth": gt,
+                        "similarity": similarity,
+                        "difference_type": self._categorize_difference(pred, gt, task_type)
+                    })
+                
+                # 更新進度條並顯示記憶體使用情況
+                pbar.update(1)
+                if (i + 1) % 50 == 0:  # 每50個比較顯示一次記憶體
+                    memory_info = self._get_memory_usage()
+                    pbar.set_postfix({
+                        'matches': sum(matches),
+                        'differences': len(differences),
+                        'accuracy': f'{sum(matches)/(i+1):.3f}',
+                        'memory': f'{memory_info["process_rss"]:.1f}GB'
+                    })
+                else:
+                    pbar.set_postfix({
+                        'matches': sum(matches),
+                        'differences': len(differences),
+                        'accuracy': f'{sum(matches)/(i+1):.3f}'
+                    })
+        
+        self._log_memory_usage("comparison complete")
         
         # Calculate overall metrics
         accuracy = sum(matches) / len(matches)
@@ -241,6 +383,7 @@ class ComparisonTuner:
         # Error analysis
         error_analysis = self._analyze_errors(differences, task_type)
         
+        # Todo; similarity 改成數字距離形式（因為輸出是數字）
         results = {
             "overall_metrics": {
                 "accuracy": accuracy,
@@ -398,26 +541,36 @@ class ComparisonTuner:
             Tuning results and updated model performance
         """
         logger.info(f"Starting adaptive tuning with strategy: {tuning_strategy}")
+        self._log_memory_usage("adaptive tuning start")
         
         # Load dataset
-        dataset = self.dataset_processor.load_dataset_from_file(dataset_path)
+        with tqdm(total=100, desc="Loading dataset", unit="%") as pbar:
+            dataset = self.dataset_processor.load_dataset_from_file(dataset_path)
+            pbar.update(30)
+            
+            # Prepare training data based on strategy
+            pbar.set_description("Preparing training data")
+            if tuning_strategy == "error_focused":
+                training_data = self._prepare_error_focused_data(comparison_results, dataset, text_column, answer_column)
+            elif tuning_strategy == "full_retrain":
+                training_data = self._prepare_full_training_data(dataset, text_column, answer_column)
+            elif tuning_strategy == "incremental":
+                training_data = self._prepare_incremental_data(comparison_results, dataset, text_column, answer_column)
+            else:
+                raise ValueError(f"Unknown tuning strategy: {tuning_strategy}")
+            pbar.update(40)
+            
+            if not training_data:
+                logger.warning("No training data prepared. Skipping tuning.")
+                return {"status": "skipped", "reason": "no_training_data"}
+            
+            # Convert to dataset format
+            pbar.set_description("Converting to dataset format")
+            train_dataset = Dataset.from_list(training_data)
+            pbar.update(30)
         
-        # Prepare training data based on strategy
-        if tuning_strategy == "error_focused":
-            training_data = self._prepare_error_focused_data(comparison_results, dataset, text_column, answer_column)
-        elif tuning_strategy == "full_retrain":
-            training_data = self._prepare_full_training_data(dataset, text_column, answer_column)
-        elif tuning_strategy == "incremental":
-            training_data = self._prepare_incremental_data(comparison_results, dataset, text_column, answer_column)
-        else:
-            raise ValueError(f"Unknown tuning strategy: {tuning_strategy}")
-        
-        if not training_data:
-            logger.warning("No training data prepared. Skipping tuning.")
-            return {"status": "skipped", "reason": "no_training_data"}
-        
-        # Convert to dataset format
-        train_dataset = Dataset.from_list(training_data)
+        logger.info(f"Prepared {len(training_data)} training samples for {tuning_strategy} strategy")
+        self._log_memory_usage("after training data preparation")
         
         # Set up training arguments
         training_args = TrainingArguments(
@@ -454,13 +607,25 @@ class ComparisonTuner:
                 save_files=self.save_files,
             )
         
-        # Perform training
-        training_results = trainer.train(
-            train_dataset=train_dataset,
-            training_args=training_args,
-        )
+        # Perform training with progress indication
+        logger.info(f"Starting training for {max_epochs} epochs...")
+        self._log_memory_usage("before training")
+        
+        with tqdm(total=max_epochs, desc="Training epochs", unit="epoch") as epoch_pbar:
+            training_results = trainer.train(
+                train_dataset=train_dataset,
+                training_args=training_args,
+            )
+            epoch_pbar.update(max_epochs)  # 訓練完成後更新進度條
+        
+        self._log_memory_usage("after training")
+        
+        # 清理訓練後的記憶體
+        self._cleanup_memory()
+        self._log_memory_usage("after training cleanup")
         
         # Evaluate after tuning
+        logger.info("Evaluating model performance after tuning...")
         post_tuning_results = self.load_and_compare_dataset(
             dataset_path=dataset_path,
             text_column=text_column,
@@ -494,6 +659,8 @@ class ComparisonTuner:
         if self.save_files:
             self._save_tuning_results(tuning_results)
         
+        logger.success(f"Adaptive tuning completed. Accuracy improved from {comparison_results['overall_metrics']['accuracy']:.3f} to {post_tuning_results['overall_metrics']['accuracy']:.3f}")
+        
         return tuning_results
     
     def _prepare_error_focused_data(
@@ -510,30 +677,40 @@ class ComparisonTuner:
         error_indices = [diff["index"] for diff in comparison_results["differences"]]
         task_type = comparison_results.get("task_type", "classification")
         
-        for idx in error_indices:
-            if idx < len(dataset):
-                input_text = dataset[idx][text_column]
-                target_answer = dataset[idx][answer_column]
-                
-                if task_type == "generation":
-                    # For generation tasks, format as input-output pairs
-                    formatted_text = f"{input_text}\n答案: {target_answer}"
-                    encoded = self.tokenizer(
-                        formatted_text, 
-                        truncation=True, 
-                        max_length=512,
-                        return_tensors=None
-                    )
-                    training_data.append({
-                        "input_ids": encoded["input_ids"],
-                        "labels": encoded["input_ids"].copy(),
-                    })
-                else:
-                    # For classification tasks
-                    training_data.append({
-                        "text": input_text,
-                        "label": target_answer,
-                    })
+        logger.info(f"Preparing error-focused training data for {len(error_indices)} errors...")
+        
+        # 為錯誤數據準備添加進度條
+        with tqdm(error_indices, desc="Processing error samples", unit="sample") as pbar:
+            for idx in pbar:
+                if idx < len(dataset):
+                    input_text = dataset[idx][text_column]
+                    target_answer = dataset[idx][answer_column]
+                    
+                    if task_type == "generation":
+                        # For generation tasks, format as input-output pairs
+                        formatted_text = f"{input_text}\n答案: {target_answer}"
+                        encoded = self.tokenizer(
+                            formatted_text, 
+                            truncation=True, 
+                            max_length=512,
+                            padding=True,
+                            return_attention_mask=True,  # 明確返回 attention mask
+                            return_tensors=None
+                        )
+                        training_data.append({
+                            "input_ids": encoded["input_ids"],
+                            "attention_mask": encoded["attention_mask"],  # 包含 attention mask
+                            "labels": encoded["input_ids"].copy(),
+                        })
+                    else:
+                        # For classification tasks
+                        training_data.append({
+                            "text": input_text,
+                            "label": target_answer,
+                        })
+                    
+                    # 更新進度條顯示
+                    pbar.set_postfix({"prepared": len(training_data)})
         
         logger.info(f"Prepared {len(training_data)} error-focused training samples")
         return training_data
@@ -547,22 +724,32 @@ class ComparisonTuner:
         """Prepare full training data."""
         training_data = []
         
-        for i in range(len(dataset)):
-            input_text = dataset[i][text_column]
-            target_answer = dataset[i][answer_column]
-            
-            # Format as input-output pairs for generation
-            formatted_text = f"{input_text}\n答案: {target_answer}"
-            encoded = self.tokenizer(
-                formatted_text, 
-                truncation=True, 
-                max_length=512,
-                return_tensors=None
-            )
-            training_data.append({
-                "input_ids": encoded["input_ids"],
-                "labels": encoded["input_ids"].copy(),
-            })
+        logger.info(f"Preparing full training data for {len(dataset)} samples...")
+        
+        # 為完整數據準備添加進度條
+        with tqdm(range(len(dataset)), desc="Processing full dataset", unit="sample") as pbar:
+            for i in pbar:
+                input_text = dataset[i][text_column]
+                target_answer = dataset[i][answer_column]
+                
+                # Format as input-output pairs for generation
+                formatted_text = f"{input_text}\n答案: {target_answer}"
+                encoded = self.tokenizer(
+                    formatted_text, 
+                    truncation=True, 
+                    max_length=512,
+                    padding=True,
+                    return_attention_mask=True,  # 明確返回 attention mask
+                    return_tensors=None
+                )
+                training_data.append({
+                    "input_ids": encoded["input_ids"],
+                    "attention_mask": encoded["attention_mask"],  # 包含 attention mask
+                    "labels": encoded["input_ids"].copy(),
+                })
+                
+                # 更新進度條顯示
+                pbar.set_postfix({"prepared": len(training_data)})
         
         logger.info(f"Prepared {len(training_data)} full training samples")
         return training_data

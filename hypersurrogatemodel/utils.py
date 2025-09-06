@@ -178,7 +178,7 @@ def get_device(prefer_gpu: bool = True) -> torch.device:
     """
     if prefer_gpu:
         if torch.cuda.is_available():
-            device = torch.device("cuda")
+            device = torch.device("cuda:0")
             logger.debug(f"Using CUDA device: {torch.cuda.get_device_name()}")
         elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
             device = torch.device("mps")

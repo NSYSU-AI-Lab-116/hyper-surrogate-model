@@ -5,6 +5,10 @@ This module provides functionality for comparing LLM outputs with dataset answer
 and performing fine-tuning based on the differences.
 """
 
+import os
+# 設置環境變量以減少 Transformers 的詳細日誌輸出
+os.environ['TRANSFORMERS_VERBOSITY'] = 'error'
+
 import torch
 import numpy as np
 import json
@@ -59,10 +63,65 @@ class ComparisonTuner:
             self.output_dir.mkdir(parents=True, exist_ok=True)
         self.use_wandb = use_wandb
         
+        # 設置 GPU 記憶體優化
+        self._setup_gpu_memory_optimization()
+        
+        # 暫時禁用參數檢測以避免問題
+        # self._detect_supported_parameters()
+        self.supported_params = set()  # 使用空集合，只用基本參數
+        
         # Initialize components
         self.dataset_processor = DomainDatasetProcessor(tokenizer)
         self.evaluator = ModelEvaluator(model, tokenizer)
         self.performance_monitor = PerformanceMonitor(str(self.output_dir / "performance_logs"))
+        
+    def _setup_gpu_memory_optimization(self) -> None:
+        """設置 GPU 記憶體優化配置"""
+        import os
+        
+        # 設置環境變量以避免無效參數警告
+        os.environ['TRANSFORMERS_VERBOSITY'] = 'error'  # 降低日誌級別以減少警告
+        
+        if torch.cuda.is_available():
+            # 設置記憶體分配策略
+            os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
+            
+            # 初始清理記憶體
+            torch.cuda.empty_cache()
+            
+            # 記錄初始記憶體狀態
+            total_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
+            logger.info(f"GPU memory optimization enabled. Total GPU memory: {total_memory:.2f}GB")
+            self._log_memory_usage("initialization")
+    
+    def _detect_supported_parameters(self) -> None:
+        """檢測模型支持的生成參數"""
+        self.supported_params = set()
+        
+        try:
+            # 測試可能支持的生成參數（移除已知不支持的）
+            test_params = {
+                'use_cache': False,
+                'top_k': 50,
+                'top_p': 0.9,
+                'repetition_penalty': 1.0,
+                'length_penalty': 1.0,
+            }
+            
+            logger.info("Detecting supported generation parameters...")
+            
+            for param_name, param_value in test_params.items():
+                if self._test_generation_parameter(param_name, param_value):
+                    self.supported_params.add(param_name)
+                    logger.debug(f"✓ Parameter '{param_name}' is supported")
+                else:
+                    logger.debug(f"✗ Parameter '{param_name}' is not supported")
+            
+            logger.info(f"Supported parameters: {sorted(self.supported_params)}")
+            
+        except Exception as e:
+            logger.warning(f"Failed to detect supported parameters: {e}. Using basic parameters only.")
+            self.supported_params = set()  # 使用空集合，只用基本參數
         
     def _get_memory_usage(self) -> Dict[str, float]:
         """
@@ -123,19 +182,191 @@ class ComparisonTuner:
         
         logger.info("=" * 35)
         
-    def _cleanup_memory(self) -> None:
+    def _cleanup_memory(self, log_before_after: bool = False) -> None:
         """
         Perform memory cleanup operations.
+        
+        Args:
+            log_before_after: Whether to log memory usage before and after cleanup
         """
+        if log_before_after:
+            memory_before = self._get_memory_usage()
+            logger.debug(f"Memory before cleanup: Process={memory_before['process_rss']:.2f}GB")
+        
         # Python garbage collection
-        gc.collect()
+        collected = gc.collect()
         
         # PyTorch cache cleanup
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+            # Reset peak memory stats for better tracking
+            torch.cuda.reset_peak_memory_stats()
         elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
             if hasattr(torch.mps, 'empty_cache'):
                 torch.mps.empty_cache()
+        
+        if log_before_after:
+            memory_after = self._get_memory_usage()
+            memory_freed = memory_before['process_rss'] - memory_after['process_rss']
+            logger.debug(f"Memory after cleanup: Process={memory_after['process_rss']:.2f}GB (freed {memory_freed:.2f}GB, collected {collected} objects)")
+    
+    def force_memory_cleanup(self) -> Dict[str, float]:
+        """
+        Perform aggressive memory cleanup and return memory statistics.
+        
+        Returns:
+            Dictionary with memory statistics before and after cleanup
+        """
+        logger.info("Performing aggressive memory cleanup...")
+        
+        memory_before = self._get_memory_usage()
+        
+        # Multiple rounds of garbage collection
+        for _ in range(3):
+            gc.collect()
+        
+        # Clear PyTorch caches
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.reset_peak_memory_stats()
+            # Clear all caches
+            if hasattr(torch.cuda, 'ipc_collect'):
+                torch.cuda.ipc_collect()
+        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            if hasattr(torch.mps, 'empty_cache'):
+                torch.mps.empty_cache()
+        
+        # Force garbage collection again
+        gc.collect()
+        
+        memory_after = self._get_memory_usage()
+        memory_freed = memory_before['process_rss'] - memory_after['process_rss']
+        
+        logger.info(f"Aggressive cleanup completed: freed {memory_freed:.2f}GB")
+        
+        return {
+            'memory_before': memory_before['process_rss'],
+            'memory_after': memory_after['process_rss'],
+            'memory_freed': memory_freed
+        }
+    
+    def _check_gpu_memory_availability(self, required_gb: float = 1.0) -> bool:
+        """
+        檢查是否有足夠的 GPU 記憶體
+        
+        Args:
+            required_gb: 需要的記憶體量 (GB)
+            
+        Returns:
+            是否有足夠的記憶體
+        """
+        if not torch.cuda.is_available():
+            return True  # CPU 模式不需要檢查 GPU 記憶體
+        
+        try:
+            total_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
+            cached_memory = torch.cuda.memory_reserved() / 1024**3
+            free_memory = total_memory - cached_memory
+            
+            is_available = free_memory >= required_gb
+            
+            if not is_available:
+                logger.warning(f"Insufficient GPU memory: need {required_gb:.2f}GB, have {free_memory:.2f}GB")
+            
+            return is_available
+            
+        except Exception as e:
+            logger.warning(f"Failed to check GPU memory: {e}")
+            return False
+        
+    def _auto_adjust_batch_size(self, initial_batch_size: int) -> int:
+        """
+        根據 GPU 記憶體自動調整批次大小
+        
+        Args:
+            initial_batch_size: 初始批次大小
+            
+        Returns:
+            調整後的批次大小
+        """
+        if not torch.cuda.is_available():
+            logger.warning("CUDA not available, using smaller batch size")
+            return min(initial_batch_size, 4)  # CPU 模式下使用較小批次
+        
+        try:
+            # 獲取 GPU 記憶體信息
+            total_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3  # GB
+            allocated_memory = torch.cuda.memory_allocated() / 1024**3  # GB
+            cached_memory = torch.cuda.memory_reserved() / 1024**3  # GB
+            free_memory = total_memory - cached_memory
+            
+            # 根據可用記憶體調整批次大小
+            if free_memory > 4.0:  # 超過 4GB 可用
+                recommended_batch_size = min(initial_batch_size, 256)
+            elif free_memory > 2.0:  # 2-4GB 可用
+                recommended_batch_size = min(initial_batch_size, 128)
+            elif free_memory > 1.0:  # 1-2GB 可用
+                recommended_batch_size = min(initial_batch_size, 32)
+            else:  # 少於 1GB 可用
+                recommended_batch_size = min(initial_batch_size, 8)
+            
+            if recommended_batch_size != initial_batch_size:
+                logger.info(f"Auto-adjusted batch size from {initial_batch_size} to {recommended_batch_size} based on available GPU memory")
+            
+            return recommended_batch_size
+            
+        except Exception as e:
+            logger.warning(f"Failed to auto-adjust batch size: {e}")
+            return min(initial_batch_size, 4)
+    
+    def _get_safe_generation_kwargs(self) -> Dict[str, Any]:
+        """
+        獲取安全的生成參數，避免無效參數警告
+        
+        Returns:
+            安全的生成參數字典
+        """
+        # 使用最基本和絕對安全的參數，不依賴任何檢測
+        safe_kwargs = {
+            'max_new_tokens': 50,
+            'temperature': 0.7,
+            'do_sample': True,
+        }
+        
+        return safe_kwargs
+    
+    def _test_generation_parameter(self, param_name: str, param_value: Any) -> bool:
+        """
+        測試特定生成參數是否被模型支持
+        
+        Args:
+            param_name: 參數名稱
+            param_value: 參數值
+            
+        Returns:
+            是否支持該參數
+        """
+        try:
+            # 對於已知不支持的參數，直接返回 False
+            known_unsupported = {'early_stopping', 'cache_implementation'}
+            if param_name in known_unsupported:
+                return False
+            
+            # 使用 model.py 中的安全生成方法
+            test_kwargs = {param_name: param_value}
+            
+            # 嘗試生成一個最小的測試輸出
+            test_output = self.model.generate_text(
+                prompt="test",
+                max_new_tokens=1,
+                do_sample=False,
+                **test_kwargs
+            )
+            return True
+            
+        except Exception as e:
+            logger.debug(f"Parameter {param_name} test failed: {e}")
+            return False
         
     def load_and_compare_dataset(
         self,
@@ -160,39 +391,24 @@ class ComparisonTuner:
         """
         logger.setFunctionsName("load_and_compare_dataset")
         
-        # 初始記憶體使用情況
-        self._log_memory_usage("dataset loading start")
-        
         # Load dataset
         dataset = self.dataset_processor.load_dataset_from_file(dataset_path)
         
         logger.info(f"Loaded dataset with {len(dataset)} samples")
         logger.info(f"Columns: {dataset.column_names}")
-        
-        # 載入數據後的記憶體使用情況
-        self._log_memory_usage("after dataset loading")
-        
-        # Extract texts and ground truth answers
+
+
         texts = dataset[text_column]
         ground_truth = dataset[answer_column]
         
         # Generate predictions
         predictions = self._generate_predictions(texts, task_type)
         
-        # 生成預測後的記憶體使用情況
-        self._log_memory_usage("after predictions generation")
         
         # Compare predictions with ground truth
         comparison_results = self._compare_outputs(
             texts, predictions, ground_truth, comparison_method, task_type
         )
-        
-        # 比較完成後的記憶體使用情況
-        self._log_memory_usage("after comparison")
-        
-        # 清理記憶體
-        self._cleanup_memory()
-        self._log_memory_usage("after memory cleanup")
         
         # Save comparison results only if enabled
         if self.save_files:
@@ -204,7 +420,7 @@ class ComparisonTuner:
         self,
         texts: List[str],
         task_type: str,
-        batch_size: int = 8
+        batch_size: int = 256  # 更保守的默認批次大小
     ) -> List[Union[str, int]]:
         """
         Generate predictions for input texts.
@@ -222,11 +438,20 @@ class ComparisonTuner:
         logger.info(f"Generating predictions for {len(texts)} samples...")
         self._log_memory_usage("prediction generation start")
         
+        # 自動調整批次大小
+        adjusted_batch_size = self._auto_adjust_batch_size(batch_size)
+        if adjusted_batch_size != batch_size:
+            logger.info(f"Batch size adjusted from {batch_size} to {adjusted_batch_size}")
+            batch_size = adjusted_batch_size
+        
         # 為批次處理添加進度條
         num_batches = (len(texts) + batch_size - 1) // batch_size
+        cleanup_interval = max(1, num_batches // 10)  # 每處理10%的批次清理一次記憶體
+        
         with tqdm(total=len(texts), desc="Generating predictions", unit="sample") as pbar:
             for i in range(0, len(texts), batch_size):
                 batch_texts = texts[i:i + batch_size]
+                batch_num = i // batch_size + 1
                 
                 if task_type == "classification":
                     batch_predictions = self._classify_batch(batch_texts)
@@ -235,20 +460,19 @@ class ComparisonTuner:
                 
                 predictions.extend(batch_predictions)
                 
-                # 更新進度條
-                pbar.update(len(batch_texts))
+                # 定期清理記憶體
+                if batch_num % cleanup_interval == 0 or batch_num == num_batches:
+                    self._cleanup_memory()
+                    if batch_num % cleanup_interval == 0:
+                        logger.info(f"Memory cleanup performed at batch {batch_num}/{num_batches}")
                 
-                # 獲取當前記憶體使用情況並顯示在進度條中
+                pbar.update(len(batch_texts))
                 memory_info = self._get_memory_usage()
                 pbar.set_postfix({
-                    'batch': f'{i//batch_size + 1}/{num_batches}',
+                    'batch': f'{batch_num}/{num_batches}',
                     'completed': f'{len(predictions)}/{len(texts)}',
                     'memory': f'{memory_info["process_rss"]:.1f}GB'
                 })
-                
-                # 每10個批次清理一次記憶體
-                if (i // batch_size + 1) % 10 == 0:
-                    self._cleanup_memory()
         
         self._log_memory_usage("prediction generation complete")
         return predictions
@@ -277,26 +501,157 @@ class ComparisonTuner:
         return predictions.cpu().numpy().tolist()
     
     def _generate_batch(self, texts: List[str]) -> List[str]:
-        """Generate text outputs for a batch of texts."""
+        """Generate text outputs for a batch of texts with adaptive batch sizing."""
         predictions = []
         
-        # 如果批次大小較大（超過5個），則顯示內部進度
+        # 動態調整批次大小以避免記憶體溢出
+        adaptive_batch_size = self._get_adaptive_batch_size(len(texts))
+        
+        if adaptive_batch_size < len(texts):
+            # 分割成更小的子批次
+            logger.info(f"Splitting batch of {len(texts)} into sub-batches of size {adaptive_batch_size}")
+            
+            for i in range(0, len(texts), adaptive_batch_size):
+                sub_batch = texts[i:i + adaptive_batch_size]
+                sub_predictions = self._generate_sub_batch(sub_batch)
+                predictions.extend(sub_predictions)
+                
+                # 每個子批次後清理記憶體
+                self._cleanup_memory()
+        else:
+            # 嘗試處理整個批次
+            predictions = self._generate_sub_batch(texts)
+        
+        return predictions
+    
+    def _get_adaptive_batch_size(self, requested_size: int) -> int:
+        """
+        根據可用 GPU 記憶體動態調整批次大小
+        
+        Args:
+            requested_size: 請求的批次大小
+            
+        Returns:
+            調整後的批次大小
+        """
+        if not torch.cuda.is_available():
+            logger.warning("CUDA not available, using smaller batch size")
+            return min(requested_size, 4)  # CPU 模式下使用較小批次
+        
+        try:
+            # 獲取 GPU 記憶體信息
+            total_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3  # GB
+            allocated_memory = torch.cuda.memory_allocated() / 1024**3  # GB
+            cached_memory = torch.cuda.memory_reserved() / 1024**3  # GB
+            free_memory = total_memory - cached_memory
+            
+            # 根據可用記憶體調整批次大小
+            if free_memory > 4.0:  # 超過 4GB 可用
+                max_batch_size = min(requested_size, 256)
+            elif free_memory > 2.0:  # 2-4GB 可用
+                max_batch_size = min(requested_size, 128)
+            elif free_memory > 1.0:  # 1-2GB 可用
+                max_batch_size = min(requested_size, 32)
+            else:  # 少於 1GB 可用
+                max_batch_size = min(requested_size, 8)
+            
+            logger.debug(f"GPU memory: {free_memory:.2f}GB free, using batch size {max_batch_size}")
+            return max_batch_size
+            
+        except Exception as e:
+            logger.warning(f"Failed to get GPU memory info: {e}, using conservative batch size")
+            return min(requested_size, 2)
+    
+    def _generate_sub_batch(self, texts: List[str]) -> List[str]:
+        """Generate text outputs for a sub-batch of texts."""
+        predictions = []
+        
+        try:
+            # 強制清理記憶體準備生成
+            self._cleanup_memory()
+            
+            # 真正的批次處理生成
+            inputs = self.tokenizer(
+                texts,
+                return_tensors="pt",
+                padding=True,
+                truncation=True,
+                max_length=512,
+                return_attention_mask=True
+            )
+            
+            # Move inputs to the same device as the model
+            device = next(self.model.model.parameters()).device
+            inputs = {k: v.to(device) for k, v in inputs.items()}
+            
+            with torch.no_grad():
+                # 嘗試使用 TrainableLLM 的安全生成方法
+                try:
+                    generation_kwargs = self._get_safe_generation_kwargs()
+                    outputs = self.model._safe_generate(
+                        input_ids=inputs["input_ids"],
+                        attention_mask=inputs["attention_mask"],
+                        **generation_kwargs
+                    )
+                except Exception as e:
+                    logger.warning(f"Safe generation failed: {e}. Using ultra-safe method.")
+                    # 回退到超級安全的方法
+                    outputs = self.model._ultra_safe_generate(
+                        input_ids=inputs["input_ids"],
+                        attention_mask=inputs["attention_mask"],
+                        max_new_tokens=50
+                    )
+            
+            # 解碼批次輸出
+            for i, output in enumerate(outputs):
+                # 移除輸入部分，只保留生成的新文本
+                input_length = inputs["input_ids"][i].shape[0]
+                generated_tokens = output[input_length:]
+                generated_text = self.tokenizer.decode(generated_tokens, skip_special_tokens=True)
+                predictions.append(generated_text.strip())
+            
+            # 清理生成後的張量
+            del outputs, inputs
+            self._cleanup_memory()
+                
+        except torch.cuda.OutOfMemoryError as e:
+            logger.warning(f"GPU OOM in sub-batch generation: {e}. Falling back to sequential generation.")
+            # 如果批次生成失敗，回退到逐個生成
+            predictions = self._generate_sequential(texts)
+            
+        except Exception as e:
+            logger.warning(f"Sub-batch generation failed: {e}. Falling back to sequential generation.")
+            predictions = self._generate_sequential(texts)
+        
+        return predictions
+    
+    def _generate_sequential(self, texts: List[str]) -> List[str]:
+        """逐個生成文本的後備方法"""
+        predictions = []
+        
+        # 每次生成前都清理記憶體
+        self._cleanup_memory()
+        
         if len(texts) > 5:
-            texts_iter = tqdm(texts, desc="Generating batch", unit="text", leave=False)
+            texts_iter = tqdm(texts, desc="Generating sequentially", unit="text", leave=False)
         else:
             texts_iter = texts
             
-        for text in texts_iter:
+        for i, text in enumerate(texts_iter):
             try:
+                # 每 5 個文本清理一次記憶體
+                if i > 0 and i % 5 == 0:
+                    self._cleanup_memory()
+                    
                 generated = self.model.generate_text(
                     prompt=text,
-                    max_new_tokens=100,
+                    max_new_tokens=50,  # 減少生成長度
                     temperature=0.7,
                     do_sample=True
                 )
                 predictions.append(generated.strip())
             except Exception as e:
-                logger.warning(f"Generation failed for text: {text[:50]}... Error: {e}")
+                logger.warning(f"Sequential generation failed for text: {text[:50]}... Error: {e}")
                 predictions.append("")
         
         return predictions
@@ -331,6 +686,8 @@ class ComparisonTuner:
         logger.info(f"Comparing {len(texts)} predictions with ground truth...")
         self._log_memory_usage("comparison start")
         
+        cleanup_interval = max(100, len(texts) // 20)  # 每處理5%的樣本清理一次記憶體
+        
         with tqdm(total=len(texts), desc="Comparing outputs", unit="comparison") as pbar:
             for i, (text, pred, gt) in enumerate(zip(texts, predictions, ground_truth)):
                 if comparison_method == "exact_match":
@@ -356,6 +713,11 @@ class ComparisonTuner:
                         "similarity": similarity,
                         "difference_type": self._categorize_difference(pred, gt, task_type)
                     })
+                
+                # 定期清理記憶體
+                if (i + 1) % cleanup_interval == 0:
+                    self._cleanup_memory()
+                    logger.debug(f"Memory cleanup performed at comparison {i+1}/{len(texts)}")
                 
                 # 更新進度條並顯示記憶體使用情況
                 pbar.update(1)
@@ -572,6 +934,9 @@ class ComparisonTuner:
         logger.info(f"Prepared {len(training_data)} training samples for {tuning_strategy} strategy")
         self._log_memory_usage("after training data preparation")
         
+        # 清理準備數據後的記憶體
+        self._cleanup_memory()
+        
         # Set up training arguments
         training_args = TrainingArguments(
             output_dir=str(self.output_dir / "adaptive_tuning") if self.save_files else "/tmp/temp_training",
@@ -620,8 +985,8 @@ class ComparisonTuner:
         
         self._log_memory_usage("after training")
         
-        # 清理訓練後的記憶體
-        self._cleanup_memory()
+        # 強制清理訓練後的記憶體
+        cleanup_stats = self.force_memory_cleanup()
         self._log_memory_usage("after training cleanup")
         
         # Evaluate after tuning
@@ -680,8 +1045,10 @@ class ComparisonTuner:
         logger.info(f"Preparing error-focused training data for {len(error_indices)} errors...")
         
         # 為錯誤數據準備添加進度條
+        cleanup_interval = max(50, len(error_indices) // 10)  # 每處理10%的錯誤樣本清理一次記憶體
+        
         with tqdm(error_indices, desc="Processing error samples", unit="sample") as pbar:
-            for idx in pbar:
+            for count, idx in enumerate(pbar, 1):
                 if idx < len(dataset):
                     input_text = dataset[idx][text_column]
                     target_answer = dataset[idx][answer_column]
@@ -709,6 +1076,11 @@ class ComparisonTuner:
                             "label": target_answer,
                         })
                     
+                    # 定期清理記憶體
+                    if count % cleanup_interval == 0:
+                        self._cleanup_memory()
+                        logger.debug(f"Memory cleanup performed at error sample {count}/{len(error_indices)}")
+                    
                     # 更新進度條顯示
                     pbar.set_postfix({"prepared": len(training_data)})
         
@@ -727,6 +1099,8 @@ class ComparisonTuner:
         logger.info(f"Preparing full training data for {len(dataset)} samples...")
         
         # 為完整數據準備添加進度條
+        cleanup_interval = max(100, len(dataset) // 20)  # 每處理5%的數據清理一次記憶體
+        
         with tqdm(range(len(dataset)), desc="Processing full dataset", unit="sample") as pbar:
             for i in pbar:
                 input_text = dataset[i][text_column]
@@ -747,6 +1121,11 @@ class ComparisonTuner:
                     "attention_mask": encoded["attention_mask"],  # 包含 attention mask
                     "labels": encoded["input_ids"].copy(),
                 })
+                
+                # 定期清理記憶體
+                if (i + 1) % cleanup_interval == 0:
+                    self._cleanup_memory()
+                    logger.debug(f"Memory cleanup performed at sample {i+1}/{len(dataset)}")
                 
                 # 更新進度條顯示
                 pbar.set_postfix({"prepared": len(training_data)})

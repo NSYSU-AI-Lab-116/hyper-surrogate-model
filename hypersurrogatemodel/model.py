@@ -5,6 +5,18 @@ This module provides a clean, trainable language model based on Gemma-3-270m-it
 with LoRA support for efficient fine-tuning.
 """
 
+import os
+import warnings
+
+# 設置環境變量和警告過濾
+os.environ['TRANSFORMERS_VERBOSITY'] = 'error'
+os.environ['TOKENIZERS_PARALLELISM'] = 'false'  # 避免多進程問題
+# 過濾特定的 transformers 警告
+warnings.filterwarnings("ignore", message=".*generation flags.*not valid.*")
+warnings.filterwarnings("ignore", message=".*cache_implementation.*")
+warnings.filterwarnings("ignore", message=".*early_stopping.*")
+warnings.filterwarnings("ignore", message=".*GenerationConfig.*")
+
 import torch
 import torch.nn as nn
 from typing import Optional, Dict, Any, Union
@@ -14,7 +26,6 @@ from transformers import (
     PreTrainedTokenizer,
 )
 from peft import LoraConfig, get_peft_model, TaskType, PeftModel
-import os
 import json
 
 from .utils import Logger
@@ -56,9 +67,33 @@ class TrainableLLM(nn.Module):
             base_model_name,
             torch_dtype=torch.float32,
             device_map=None,  # Don't use auto device mapping on MPS
+            trust_remote_code=True,
         )
+        
+        # 設置模型配置以避免無效的生成參數
+        if hasattr(self.model.config, 'cache_implementation'):
+            delattr(self.model.config, 'cache_implementation')
+        
+        # 完全重置生成配置以避免任何問題參數
+        if hasattr(self.model, 'generation_config'):
+            # 保存一些基本配置
+            original_eos_token_id = getattr(self.model.generation_config, 'eos_token_id', None)
+            original_pad_token_id = getattr(self.model.generation_config, 'pad_token_id', None)
+            original_max_length = getattr(self.model.generation_config, 'max_length', 512)
+            
+            # 創建一個新的乾淨的生成配置
+            from transformers import GenerationConfig
+            clean_config = GenerationConfig(
+                eos_token_id=original_eos_token_id,
+                pad_token_id=original_pad_token_id,
+                max_length=original_max_length,
+                do_sample=True,
+                temperature=0.7,
+            )
+            self.model.generation_config = clean_config
+            logger.info("Reset generation config to clean state")
         # Move to CPU to avoid MPS issues
-        self.model = self.model.to("cpu") # type: ignore
+        self.model = self.model.to("cuda") # type: ignore
         
         if use_lora:
             self._setup_lora(lora_config)
@@ -148,15 +183,24 @@ class TrainableLLM(nn.Module):
         inputs = {k: v.to(device) for k, v in inputs.items()}
         
         with torch.no_grad():
-            outputs = self.model.generate(
-                input_ids=inputs["input_ids"],
-                attention_mask=inputs["attention_mask"],
-                max_new_tokens=max_new_tokens,
-                temperature=temperature,
-                do_sample=do_sample,
-                pad_token_id=self.tokenizer.pad_token_id,
-                **kwargs
-            )
+            # 嘗試使用安全的生成方法
+            try:
+                outputs = self._safe_generate(
+                    input_ids=inputs["input_ids"],
+                    attention_mask=inputs["attention_mask"],
+                    max_new_tokens=max_new_tokens,
+                    temperature=temperature,
+                    do_sample=do_sample,
+                    **kwargs
+                )
+            except Exception as e:
+                logger.warning(f"Safe generation failed: {e}. Using ultra-safe method.")
+                # 回退到超級安全的方法
+                outputs = self._ultra_safe_generate(
+                    input_ids=inputs["input_ids"],
+                    attention_mask=inputs["attention_mask"],
+                    max_new_tokens=max_new_tokens
+                )
         
         # Decode only the new tokens
         generated_text = self.tokenizer.decode(
@@ -165,6 +209,74 @@ class TrainableLLM(nn.Module):
         )
         
         return generated_text
+    
+    def _safe_generate(self, input_ids, attention_mask, **kwargs):
+        """
+        安全的生成方法，確保不傳遞無效參數
+        
+        Args:
+            input_ids: 輸入 token IDs
+            attention_mask: 注意力掩碼
+            **kwargs: 其他生成參數
+            
+        Returns:
+            生成的輸出
+        """
+        # 定義絕對安全的參數列表，完全忽略默認配置
+        safe_params = {
+            'input_ids': input_ids,
+            'attention_mask': attention_mask,
+            'max_new_tokens': kwargs.get('max_new_tokens', 50),
+            'temperature': kwargs.get('temperature', 0.7),
+            'do_sample': kwargs.get('do_sample', True),
+            'pad_token_id': self.tokenizer.pad_token_id,
+        }
+        
+        # 只在確實存在時添加 eos_token_id
+        if hasattr(self.tokenizer, 'eos_token_id') and self.tokenizer.eos_token_id is not None:
+            safe_params['eos_token_id'] = self.tokenizer.eos_token_id
+        
+        # 可選的高級參數（僅在明確提供且安全時添加）
+        safe_optional_params = ['top_k', 'top_p']
+        for param in safe_optional_params:
+            if param in kwargs:
+                safe_params[param] = kwargs[param]
+        
+        # 明確禁用可能有問題的參數
+        safe_params['use_cache'] = kwargs.get('use_cache', False)
+        
+        return self.model.generate(**safe_params)
+    
+    def _ultra_safe_generate(self, input_ids, attention_mask, max_new_tokens=50):
+        """
+        超級安全的生成方法，只使用最基本的參數
+        
+        Args:
+            input_ids: 輸入 token IDs
+            attention_mask: 注意力掩碼
+            max_new_tokens: 最大生成token數
+            
+        Returns:
+            生成的輸出
+        """
+        try:
+            # 使用最基本的參數，完全避免任何可能的配置問題
+            return self.model.generate(
+                input_ids,
+                attention_mask=attention_mask,
+                max_new_tokens=max_new_tokens,
+                do_sample=False,  # 使用 greedy decoding 避免採樣相關問題
+                pad_token_id=self.tokenizer.pad_token_id,
+                eos_token_id=self.tokenizer.eos_token_id if hasattr(self.tokenizer, 'eos_token_id') else None,
+            )
+        except Exception as e:
+            logger.warning(f"Ultra safe generation failed: {e}")
+            # 最後手段：使用最簡單的生成
+            return self.model.generate(
+                input_ids,
+                max_length=input_ids.shape[1] + max_new_tokens,
+                pad_token_id=self.tokenizer.pad_token_id,
+            )
     
     def get_tokenizer(self) -> PreTrainedTokenizer:
         """Get the tokenizer for this model."""

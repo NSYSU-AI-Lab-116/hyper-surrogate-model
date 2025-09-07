@@ -92,7 +92,6 @@ def tune_with_dataset(dataset_path, model_path = None,):
     steps = ["Load model", "Load tokenizer", "Load optimizer and scheduler", "Initialize tuner"]
     lg = log_iterator(steps)
     lg.next()
-    devide = get_device()
     model = TrainableLLM(
         base_model_name = model_path if model_path else "google/gemma-3-270m-it",
         use_lora=True,
@@ -103,7 +102,6 @@ def tune_with_dataset(dataset_path, model_path = None,):
             "target_modules": ["q_proj", "v_proj"],
         }
     )
-    model.to(devide)
     logger.info("Model info:")
     model_info = model.get_model_info()
     logger.info(str(model_info))

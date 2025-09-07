@@ -22,6 +22,7 @@ import json
 import wandb
 from tqdm import tqdm
 from torch.utils.data import DataLoader
+import torch
 
 from .model import TrainableLLM, TextGenerationModel
 from .dataset import DomainDatasetProcessor
@@ -29,6 +30,54 @@ from .utils import Logger
 
 # Set up logger using utils.Logger
 logger = Logger("trainer")
+
+
+class CustomDataCollatorForCausalLM:
+    """Custom data collator for causal language modeling that handles variable-length sequences."""
+    
+    def __init__(self, tokenizer, max_length=512):
+        self.tokenizer = tokenizer
+        self.max_length = max_length
+        
+    def __call__(self, features):
+        # Extract input_ids and labels
+        input_ids = [f["input_ids"] for f in features]
+        labels = [f["labels"] for f in features]
+        
+        # Pad sequences to the same length
+        max_len = min(max(len(seq) for seq in input_ids), self.max_length)
+        
+        # Pad input_ids
+        padded_input_ids = []
+        padded_labels = []
+        attention_masks = []
+        
+        for i, (inp, lab) in enumerate(zip(input_ids, labels)):
+            # Truncate if too long
+            if len(inp) > max_len:
+                inp = inp[:max_len]
+                lab = lab[:max_len]
+            
+            # Create attention mask
+            attention_mask = [1] * len(inp)
+            
+            # Pad sequences
+            pad_length = max_len - len(inp)
+            if pad_length > 0:
+                pad_token_id = self.tokenizer.pad_token_id if self.tokenizer.pad_token_id is not None else self.tokenizer.eos_token_id
+                inp.extend([pad_token_id] * pad_length)
+                lab.extend([-100] * pad_length)  # -100 is ignored in loss computation
+                attention_mask.extend([0] * pad_length)
+            
+            padded_input_ids.append(inp)
+            padded_labels.append(lab)
+            attention_masks.append(attention_mask)
+        
+        return {
+            "input_ids": torch.tensor(padded_input_ids, dtype=torch.long),
+            "labels": torch.tensor(padded_labels, dtype=torch.long),
+            "attention_mask": torch.tensor(attention_masks, dtype=torch.long),
+        }
 
 
 class TrainingMetrics:
@@ -344,6 +393,28 @@ class GenerationTrainer:
         if use_wandb:
             wandb.init(project=wandb_project)
     
+    def _tokenize_function(self, examples):
+        """Tokenize text data for training."""
+        texts = examples["text"] if isinstance(examples["text"], list) else [examples["text"]]
+        
+        # Tokenize the texts
+        result = self.tokenizer(
+            texts,
+            truncation=True,
+            max_length=512,
+            padding=False,  # Let DataCollator handle padding
+            return_tensors=None
+        )
+        
+        # For causal language modeling, labels are the same as input_ids
+        # Create a proper copy for each sequence
+        if isinstance(result["input_ids"][0], list):
+            result["labels"] = [seq.copy() for seq in result["input_ids"]]
+        else:
+            result["labels"] = result["input_ids"].copy()
+        
+        return result
+    
     def train(
         self,
         train_dataset: Dataset,
@@ -388,10 +459,20 @@ class GenerationTrainer:
         
         # Set default data collator
         if data_collator is None:
-            data_collator = DataCollatorForLanguageModeling(
+            # Use our custom data collator for variable-length sequences
+            data_collator = CustomDataCollatorForCausalLM(
                 tokenizer=self.tokenizer,
-                mlm=False,  # Causal LM, not masked LM
+                max_length=512
             )
+        
+        # Tokenize the datasets if they contain text
+        if "text" in train_dataset.column_names:
+            train_dataset = train_dataset.map(self._tokenize_function, batched=True)
+            train_dataset = train_dataset.remove_columns(["text"])
+        
+        if eval_dataset is not None and "text" in eval_dataset.column_names:
+            eval_dataset = eval_dataset.map(self._tokenize_function, batched=True)
+            eval_dataset = eval_dataset.remove_columns(["text"])
         
         # Initialize trainer
         trainer = Trainer(

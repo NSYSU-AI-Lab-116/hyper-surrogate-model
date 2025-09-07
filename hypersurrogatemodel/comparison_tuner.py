@@ -1056,18 +1056,10 @@ class ComparisonTuner:
                     if task_type == "generation":
                         # For generation tasks, format as input-output pairs
                         formatted_text = f"{input_text}\n答案: {target_answer}"
-                        encoded = self.tokenizer(
-                            formatted_text, 
-                            truncation=True, 
-                            max_length=512,
-                            padding=True,
-                            return_attention_mask=True,  # 明確返回 attention mask
-                            return_tensors=None
-                        )
+                        
+                        # Simple format for DataCollatorForLanguageModeling
                         training_data.append({
-                            "input_ids": encoded["input_ids"],
-                            "attention_mask": encoded["attention_mask"],  # 包含 attention mask
-                            "labels": encoded["input_ids"].copy(),
+                            "text": formatted_text,
                         })
                     else:
                         # For classification tasks

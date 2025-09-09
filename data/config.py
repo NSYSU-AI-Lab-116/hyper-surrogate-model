@@ -2,7 +2,7 @@ import json
 import os
 
 # read config.json
-CONFIG_FILE = os.path.join(os.path.dirname(file), "..", "config.json")
+CONFIG_FILE = os.path.join(os.path.dirname(__file__), "..", "config.json")
 
 with open(CONFIG_FILE, "r") as f:
     cfg = json.load(f)

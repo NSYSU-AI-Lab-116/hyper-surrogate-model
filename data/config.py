@@ -1,9 +1,17 @@
-NAS_BENCH_PATH = "data/NAS-Bench-201-v1_1-096897.pth"
+import json
+import os
 
-# NAS-Bench-201 的 operator 集合（固定 5 個）
+# read config.json
+CONFIG_FILE = os.path.join(os.path.dirname(file), "..", "config.json")
+
+with open(CONFIG_FILE, "r") as f:
+    cfg = json.load(f)
+
+NAS_BENCH_PATH = cfg["NAS_BENCH_PATH"]
+
 OPERATORS = ["none", "skip_connect", "nor_conv_1x1", "nor_conv_3x3", "avg_pool_3x3"]
 
-# 訓練超參數
-BATCH_SIZE = 64
-LR = 0.001
-EPOCHS = 20
+# hyper parameters
+BATCH_SIZE = cfg.get("BATCH_SIZE", 64)
+LR = cfg.get("LR", 0.001)
+EPOCHS = cfg.get("EPOCHS", 20)

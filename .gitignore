@@ -211,3 +211,18 @@ experiments/
 
 test.py
 data/raw/NAS-Bench-201-v1_1-096897.pth
+
+# Local Config
+config.json
+
+# Large Dataset Files
+data/
+datasets/
+*.pth
+*.pt
+*.npz
+*.npy
+*.h5
+*.zip
+*.tar
+*.gz

@@ -348,7 +348,7 @@ class TrainableLLM(nn.Module):
     def save_model(
         self, 
         save_path: str, 
-        
+        addtion_name: Optional[str] = None,
         save_training_state: bool = True, 
         optimizer: Optional[torch.optim.Optimizer] = None,
         scheduler: Optional[Any] = None,
@@ -380,7 +380,7 @@ class TrainableLLM(nn.Module):
                 fs = json.load(f)
                 
             logger.info(f"Existing versions found: {len(fs)}")
-            new_version = f"v_{len(fs)+1}"
+            new_version = f"v_{len(fs)+1}" + (f"_{addtion_name}" if addtion_name else "")
             save_path = os.path.join(save_path, new_version)
             os.mkdir(save_path)
             fs.append({

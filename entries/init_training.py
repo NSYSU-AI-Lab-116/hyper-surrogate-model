@@ -5,12 +5,10 @@ import pandas as pd
 import torch
 from torch.optim import AdamW
 from tqdm import tqdm
-
 from hypersurrogatemodel import (
     TrainableLLM, 
     Logger,
 )
-from hypersurrogatemodel.utils import get_device
 
 logger = Logger("Pipelined-runner")
 torch.set_float32_matmul_precision('high')
@@ -20,12 +18,12 @@ def train_with_dataset(dataset_path, model_path="./saved_model", epochs=6, batch
     with open(dataset_path, 'r') as f:
         train_data = json.load(f)
     train_length = len(train_data) 
-    logger.info(f"載入 {train_length} 個訓練樣本")
+    logger.info(f"loaded {train_length} training samples")
     
     batches_per_epoch = (len(train_data) + batch_size - 1) // batch_size
     total_batches = epochs * batches_per_epoch
     
-    logger.info(f"總共需要處理 {total_batches} 個批次 ({epochs} epochs × {batches_per_epoch} batches/epoch)")
+    logger.info(f"total train of {total_batches} batches ({epochs} epochs × {batches_per_epoch} batches/epoch)")
     
     model = TrainableLLM(
         task_type="regression",  # numerical prediction 

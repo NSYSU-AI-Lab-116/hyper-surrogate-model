@@ -28,13 +28,10 @@ class ModelWithCustomHead(nn.Module):
         self.numerical_head.load_state_dict(custom_head_state)
     
     def forward(self, input_ids, **kwargs):
-        # Get hidden states from base model
         outputs = self.base_model(input_ids, output_hidden_states=True, **kwargs)
         
-        # Use last hidden state for your custom head
         last_hidden_state = outputs.hidden_states[-1]
         
-        # Apply your numerical head
         numerical_output = self.numerical_head(last_hidden_state[:, -1, :]) 
         
         return {

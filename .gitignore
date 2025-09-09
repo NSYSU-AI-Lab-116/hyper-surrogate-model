@@ -1,3 +1,8 @@
+# model file 
+saved_model/
+logs/
+
+
 # Python-generated files
 __pycache__/
 *.py[oc]
@@ -14,3 +19,6 @@ experiments/
 *.log
 wandb/
 .DS_Store
+
+# vscode
+.vscode/

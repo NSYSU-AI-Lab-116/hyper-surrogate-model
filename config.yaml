@@ -1,0 +1,99 @@
+# Hyper Surrogate Model Configuration
+# 主要模型配置
+model:
+  # 預訓練模型名稱 (使用較小的模型以加快速度)
+  pretrained_model: "google/gemma-3-270m-it"
+  # 是否使用LoRA
+  use_lora: true
+  # 設備設定 (auto, cuda, cpu, mps)
+  device: "auto"
+  # 任務類型: "generation" (文字生成), "regression" (數字預測), "both" (兩者)
+  task_type: "both"
+  # 數字輸出維度 (regression 或 both 模式時使用)
+  num_outputs: 1
+
+# 生成參數配置
+generation:
+  # 最大新生成token數量 (降低以加快生成速度)
+  max_new_tokens: 10
+  # 採樣溫度 (0.0-2.0)
+  temperature: 0.7
+  # 是否使用採樣
+  do_sample: true
+  # Top-k採樣參數
+  top_k: 64
+  # Top-p採樣參數 
+  top_p: 0.95
+  # 重複懲罰
+  repetition_penalty: 1.1
+  # 長度懲罰
+  length_penalty: 1.0
+  # beam search數量
+  num_beams: 1
+
+# 訓練參數配置
+training:
+  # 批次大小
+  batch_size: 8
+  # 學習率
+  learning_rate: 2e-5
+  # 訓練輪數
+  num_epochs: 3
+  # 熱身步數
+  warmup_steps: 100
+  # 權重衰減
+  weight_decay: 0.01
+  # 是否使用fp16
+  fp16: false
+  # 梯度累積步數
+  gradient_accumulation_steps: 1
+
+# LoRA配置
+lora:
+  # LoRA rank
+  r: 16
+  # LoRA alpha
+  lora_alpha: 32
+  # LoRA dropout
+  lora_dropout: 0.1
+  # 目標模組
+  target_modules:
+    - "q_proj"
+    - "v_proj"
+    - "k_proj"
+    - "o_proj"
+
+# 日誌配置
+logging:
+  # 日誌級別
+  level: "INFO"
+  # 是否使用wandb
+  use_wandb: false
+  # wandb專案名稱
+  wandb_project: "hypersurrogatemodel"
+  # 是否保存檔案
+  save_files: true
+  # 輸出目錄
+  output_dir: "./results"
+
+# 資料集配置
+dataset:
+  # 最大序列長度
+  max_length: 512
+  # 填充策略
+  padding: "max_length"
+  # 截斷
+  truncation: true
+  # 提示模板類型
+  template_type: "generation"
+
+# 比較和調優配置
+comparison:
+  # 比較方法 (exact_match, similarity, structured)
+  method: "similarity"
+  # 批次大小 (大幅降低以加快處理速度)
+  batch_size: 8
+  # 相似度閾值
+  similarity_threshold: 0.8
+  # 調優策略 (error_focused, random_sampling, confidence_based)
+  tuning_strategy: "error_focused"

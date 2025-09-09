@@ -23,6 +23,7 @@ dependencies = [
     "wandb>=0.21.3",
     "seaborn>=0.13.2",
     "huggingface-hub>=0.34.4",
+    "pyyaml>=6.0.2",
 ]
 
 [project.optional-dependencies]

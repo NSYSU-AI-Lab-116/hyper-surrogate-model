@@ -32,7 +32,7 @@ class PromptTemplate:
         Initialize prompt template.
         
         Args:
-            template_type: "classification")
+            template_type: "generation")
         """
         self.template_type = template_type
         self.templates = self._load_templates()
@@ -40,17 +40,18 @@ class PromptTemplate:
     def _load_templates(self) -> Dict[str, str]:
         """Load predefined prompt templates."""
         templates = {
-            "classification": 
+            "generation": 
                 """
                     Please analys the below data and choose the most suitable surrogate model combination for training its archtechture within its domain.
                     {text}
                 """,
             "structured":
                 """
-                    Please analys the below data and choose the most suitable surrogate model combination for training its archtechture within its domain.
+                    Please analys the below data and give the most suitable accuracy of the structure, indicating its performance after trained.
                     {text}
-                    and output within a structured format as JSON as follows:
-                    {"index":double}
+                    
+                    Next, output the result with a structured JSON format as follows:
+                    {"accuracy":double}
                     
                 """
         }
@@ -159,47 +160,38 @@ class DomainDatasetProcessor:
         
         return Dataset.from_list(data)
     
-    def create_classification_dataset(
+    def create_generation_dataset(
         self,
         texts: List[str],
-        labels: List[int],
-        domain: str = "general",
-        include_prompt: bool = True,
+        labels: List[Union[str, int]],
+        max_length: int = 512,
+        template_type: str = "generation",
     ) -> Dataset:
         """
-        Create a classification dataset with prompts.
+        Create a generation dataset with prompts.
         
         Args:
-            texts: List of text samples
+            texts: List of input texts
             labels: List of corresponding labels
-            domain: Domain name for contextualization
-            include_prompt: Whether to wrap texts in prompts
+            max_length: Maximum sequence length
+            template_type: Type of prompt template to use
             
         Returns:
-            Processed dataset
+            Processed dataset ready for training
         """
-        if len(texts) != len(labels):
-            raise ValueError("Texts and labels must have the same length")
+        processed_data = []
         
-        data = []
         for text, label in zip(texts, labels):
-            if include_prompt:
-                # Use classification prompt template
-                formatted_text = self.prompt_template.format_prompt(
-                    template_type="classification",
-                    text=text
-                )
-            else:
-                formatted_text = text
+            # Use generation prompt template
+            prompt_template = PromptTemplate(template_type="generation")
+            formatted_text = prompt_template.format_prompt(text)
             
-            data.append({
+            processed_data.append({
                 "text": formatted_text,
                 "label": label,
-                "domain": domain,
-                "original_text": text,
             })
         
-        return Dataset.from_list(data)
+        return Dataset.from_list(processed_data)
     
     def tokenize_dataset(
         self,
@@ -290,40 +282,6 @@ class DomainDatasetProcessor:
             "validation": val_test_dataset["train"],
             "test": val_test_dataset["test"],
         })
-    
-    def create_sample_domain_dataset(self, domain: str = "sentiment_analysis") -> Dataset:
-        """
-        Create a sample domain-specific dataset for demonstration.
-        
-        Args:
-            domain: Domain type for sample data
-            
-        Returns:
-            Sample dataset
-        """
-        if domain == "sentiment_analysis":
-            texts = [
-                "這個產品真的很棒，品質超出期待！",
-                "服務態度很差，完全不推薦。",
-                "價格合理，功能實用，值得購買。",
-                "包裝破損，產品有瑕疵，很失望。",
-                "客服回應迅速，解決問題很有效率。",
-                "等了很久才收到，而且品質一般。",
-                "外觀設計很漂亮，使用起來很順手。",
-                "說明書不清楚，操作很複雜。",
-                "物超所值，會推薦給朋友。",
-                "退貨流程很麻煩，客服態度冷漠。",
-            ]
-            labels = [1, 0, 1, 0, 1, 0, 1, 0, 1, 0]  # 1: positive, 0: negative
-            
-            return self.create_classification_dataset(
-                texts=texts,
-                labels=labels,
-                domain=domain,
-            )
-        
-        else:
-            raise ValueError(f"Unknown sample domain: {domain}")
     
     def export_dataset(
         self,

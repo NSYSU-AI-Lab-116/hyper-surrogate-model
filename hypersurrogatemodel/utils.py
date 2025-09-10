@@ -11,15 +11,10 @@ import random
 import json
 import yaml
 import logging
-from typing import Dict, Any, List, Optional, Union, Tuple
+from typing import Dict, Any, List, Optional, Union
 from pathlib import Path
 import os
 from datetime import datetime
-import hashlib
-import pickle
-from contextlib import contextmanager
-import psutil
-import GPUtil
 
 class ColoredFormatter(logging.Formatter):
     """
@@ -201,12 +196,6 @@ def get_system_info() -> Dict[str, Any]:
         Dictionary containing system information
     """
     info = {
-        "cpu_count": psutil.cpu_count(),
-        "cpu_percent": psutil.cpu_percent(interval=1),
-        "memory_total_gb": psutil.virtual_memory().total / (1024**3),
-        "memory_available_gb": psutil.virtual_memory().available / (1024**3),
-        "memory_used_percent": psutil.virtual_memory().percent,
-        "disk_usage_percent": psutil.disk_usage('/').percent,
         "pytorch_version": torch.__version__,
         "cuda_available": torch.cuda.is_available(),
         "mps_available": hasattr(torch.backends, 'mps') and torch.backends.mps.is_available(),
@@ -218,25 +207,6 @@ def get_system_info() -> Dict[str, Any]:
         info["cuda_device_name"] = torch.cuda.get_device_name()
         info["cuda_memory_allocated_gb"] = torch.cuda.memory_allocated() / (1024**3)
         info["cuda_memory_reserved_gb"] = torch.cuda.memory_reserved() / (1024**3)
-        
-        # Additional GPU info using GPUtil
-        try:
-            gpus = GPUtil.getGPUs()
-            info["gpu_details"] = [
-                {
-                    "id": gpu.id,
-                    "name": gpu.name,
-                    "memory_total_mb": gpu.memoryTotal,
-                    "memory_used_mb": gpu.memoryUsed,
-                    "memory_free_mb": gpu.memoryFree,
-                    "memory_util_percent": gpu.memoryUtil * 100,
-                    "gpu_util_percent": gpu.load * 100,
-                    "temperature": gpu.temperature,
-                }
-                for gpu in gpus
-            ]
-        except Exception as e:
-            logger.warning(f"Could not get detailed GPU info: {e}")
     
     return info
 
@@ -329,92 +299,6 @@ def create_experiment_directory(
     return experiment_dir
 
 
-def calculate_model_hash(model: nn.Module) -> str:
-    """
-    Calculate a hash of the model's state dict for versioning.
-    
-    Args:
-        model: PyTorch model
-        
-    Returns:
-        Model hash string
-    """
-    model_str = str(model.state_dict())
-    model_hash = hashlib.md5(model_str.encode()).hexdigest()
-    return model_hash[:8]  # Return first 8 characters
-
-
-def count_parameters(model: nn.Module, only_trainable: bool = False) -> int:
-    """
-    Count the number of parameters in a model.
-    
-    Args:
-        model: PyTorch model
-        only_trainable: Whether to count only trainable parameters
-        
-    Returns:
-        Number of parameters
-    """
-    if only_trainable:
-        return sum(p.numel() for p in model.parameters() if p.requires_grad)
-    else:
-        return sum(p.numel() for p in model.parameters())
-
-
-def get_model_memory_usage(model: nn.Module) -> Dict[str, float]:
-    """
-    Estimate model memory usage.
-    
-    Args:
-        model: PyTorch model
-        
-    Returns:
-        Dictionary with memory usage information
-    """
-    param_size = 0
-    param_sum = 0
-    
-    for param in model.parameters():
-        param_size += param.nelement() * param.element_size()
-        param_sum += param.nelement()
-    
-    buffer_size = 0
-    buffer_sum = 0
-    
-    for buffer in model.buffers():
-        buffer_size += buffer.nelement() * buffer.element_size()
-        buffer_sum += buffer.nelement()
-    
-    all_size = (param_size + buffer_size) / 1024 / 1024  # Convert to MB
-    
-    return {
-        "parameters_mb": param_size / 1024 / 1024,
-        "buffers_mb": buffer_size / 1024 / 1024,
-        "total_mb": all_size,
-        "parameter_count": param_sum,
-        "buffer_count": buffer_sum,
-    }
-
-
-@contextmanager
-def timer(description: str = "Operation"):
-    """
-    Context manager for timing operations.
-    
-    Args:
-        description: Description of the operation being timed
-    """
-    start_time = datetime.now()
-    logger.info(f"{description} started at {start_time.strftime('%H:%M:%S')}")
-    
-    try:
-        yield
-    finally:
-        end_time = datetime.now()
-        duration = end_time - start_time
-        logger.info(f"{description} completed in {duration}")
-
-
 def ensure_directory(path: Union[str, Path]) -> Path:
     """
     Ensure a directory exists, create if it doesn't.
@@ -428,186 +312,6 @@ def ensure_directory(path: Union[str, Path]) -> Path:
     path = Path(path)
     path.mkdir(parents=True, exist_ok=True)
     return path
-
-
-def safe_save_pickle(obj: Any, path: Union[str, Path]) -> None:
-    """
-    Safely save object to pickle file with backup.
-    
-    Args:
-        obj: Object to save
-        path: Save path
-    """
-    path = Path(path)
-    ensure_directory(path.parent)
-    
-    # Create temporary file first
-    temp_path = path.with_suffix(path.suffix + '.tmp')
-    
-    with open(temp_path, 'wb') as f:
-        pickle.dump(obj, f)
-    
-    # If backup exists, remove it
-    backup_path = path.with_suffix(path.suffix + '.bak')
-    if backup_path.exists():
-        backup_path.unlink()
-    
-    # Move current file to backup if it exists
-    if path.exists():
-        path.rename(backup_path)
-    
-    # Move temp file to final location
-    temp_path.rename(path)
-    
-    logger.info(f"Object saved to {path}")
-
-
-def safe_load_pickle(path: Union[str, Path]) -> Any:
-    """
-    Safely load object from pickle file with fallback to backup.
-    
-    Args:
-        path: Load path
-        
-    Returns:
-        Loaded object
-    """
-    path = Path(path)
-    
-    try:
-        with open(path, 'rb') as f:
-            return pickle.load(f)
-    except Exception as e:
-        logger.warning(f"Failed to load {path}: {e}")
-        
-        # Try backup file
-        backup_path = path.with_suffix(path.suffix + '.bak')
-        if backup_path.exists():
-            logger.info(f"Attempting to load backup: {backup_path}")
-            with open(backup_path, 'rb') as f:
-                return pickle.load(f)
-        else:
-            raise e
-
-
-def validate_config(config: Dict[str, Any], required_keys: List[str]) -> bool:
-    """
-    Validate configuration dictionary.
-    
-    Args:
-        config: Configuration to validate
-        required_keys: List of required keys
-        
-    Returns:
-        True if valid, raises ValueError if not
-    """
-    missing_keys = [key for key in required_keys if key not in config]
-    
-    if missing_keys:
-        raise ValueError(f"Missing required configuration keys: {missing_keys}")
-    
-    return True
-
-
-def merge_configs(base_config: Dict[str, Any], override_config: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Merge two configuration dictionaries.
-    
-    Args:
-        base_config: Base configuration
-        override_config: Configuration to override with
-        
-    Returns:
-        Merged configuration
-    """
-    merged = base_config.copy()
-    
-    for key, value in override_config.items():
-        if isinstance(value, dict) and key in merged and isinstance(merged[key], dict):
-            merged[key] = merge_configs(merged[key], value)
-        else:
-            merged[key] = value
-    
-    return merged
-
-
-def format_number(num: float, precision: int = 2) -> str:
-    """
-    Format large numbers with appropriate units.
-    
-    Args:
-        num: Number to format
-        precision: Decimal precision
-        
-    Returns:
-        Formatted number string
-    """
-    if num >= 1e9:
-        return f"{num/1e9:.{precision}f}B"
-    elif num >= 1e6:
-        return f"{num/1e6:.{precision}f}M"
-    elif num >= 1e3:
-        return f"{num/1e3:.{precision}f}K"
-    else:
-        return f"{num:.{precision}f}"
-
-
-def calculate_eta(elapsed_time: float, current_step: int, total_steps: int) -> str:
-    """
-    Calculate estimated time of arrival.
-    
-    Args:
-        elapsed_time: Time elapsed so far (seconds)
-        current_step: Current step number
-        total_steps: Total number of steps
-        
-    Returns:
-        Formatted ETA string
-    """
-    if current_step == 0:
-        return "Unknown"
-    
-    time_per_step = elapsed_time / current_step
-    remaining_steps = total_steps - current_step
-    eta_seconds = time_per_step * remaining_steps
-    
-    hours = int(eta_seconds // 3600)
-    minutes = int((eta_seconds % 3600) // 60)
-    seconds = int(eta_seconds % 60)
-    
-    if hours > 0:
-        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-    else:
-        return f"{minutes:02d}:{seconds:02d}"
-
-
-def create_progress_bar(
-    current: int, 
-    total: int, 
-    length: int = 50, 
-    prefix: str = "Progress"
-) -> str:
-    """
-    Create a text-based progress bar.
-    
-    Args:
-        current: Current progress
-        total: Total items
-        length: Length of progress bar
-        prefix: Prefix text
-        
-    Returns:
-        Progress bar string
-    """
-    if total == 0:
-        return f"{prefix}: [{'='*length}] 100%"
-    
-    progress = current / total
-    filled_length = int(length * progress)
-    bar = '=' * filled_length + '-' * (length - filled_length)
-    percent = progress * 100
-    
-    return f"{prefix}: [{bar}] {percent:.1f}% ({current}/{total})"
 
 
 class ConfigManager:

@@ -1,0 +1,58 @@
+model:
+  pretrained_model: "google/gemma-3-270m-it"
+  use_lora: true
+  device: "auto"
+  num_outputs: 1 #Available for regression tasks
+
+# 生成參數配置
+generation:
+  max_new_tokens: 256
+  #temperature: 0.7
+  #do_sample: true
+  #top_k: 64
+  #top_p: 0.95
+  #repetition_penalty: 1.1
+  #length_penalty: 1.0
+  #num_beams: 1
+
+
+training:
+  batch_size: 16
+  learning_rate: 1e-5
+  num_epochs: 12
+  #warmup_steps: 100
+  #weight_decay: 0.01
+
+lora:
+  r: 16
+  lora_alpha: 32
+  lora_dropout: 0.1
+  target_modules:
+    - "q_proj"
+    - "v_proj"
+    - "k_proj"
+    - "o_proj"
+
+logging:
+  #wandb_project: "hypersurrogatemodel"
+  save_files: true
+  output_dir: "./results"
+
+
+# dataset:
+#   # 最大序列長度
+#   max_length: 512
+#   # 填充策略
+#   padding: "max_length"
+#   # 截斷
+#   truncation: true
+#   # 提示模板類型
+#   template_type: "generation"
+
+# comparison:
+#   # 比較方法 (exact_match, similarity, structured)
+#   method: "similarity"
+#   batch_size: 8
+#   similarity_threshold: 0.8
+#   # 調優策略 (error_focused, random_sampling, confidence_based)
+#   tuning_strategy: "error_focused"

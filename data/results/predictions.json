@@ -1,0 +1,10 @@
+[
+  {
+    "input": "{'uid': 'nats-tss-0-cifar10', 'unified_text_description': 'cell=((op:avg_pool_3x3, in:0), (op:nor_conv_1x1, in:0), (op:skip_connect, in:1), (op:nor_conv_1x1, in:0), (op:skip_connect, in:1), (op:skip_connect, in:2))'}",
+    "prediction": [
+      [
+        97.0395278930664
+      ]
+    ]
+  }
+]

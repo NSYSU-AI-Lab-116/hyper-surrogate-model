@@ -359,7 +359,7 @@ class TrainableLLM(nn.Module):
         batch_size: Optional[int] = None
         ) -> None:
         
-        logger.info(f"Saving model to {save_path}...")
+        logger.step(f"Saving model to {save_path}...")
         """
         Save the model and optionally training state.
         
@@ -374,34 +374,46 @@ class TrainableLLM(nn.Module):
         """
         os.makedirs(save_path, exist_ok=True)
         import datetime
-        if os.path.exists(os.path.join(save_path, "index.json")):
-            index_json_path = os.path.join(save_path, "index.json")
-            with open(index_json_path, "r") as f:
-                fs = json.load(f)
-                
-            logger.info(f"Existing versions found: {len(fs)}")
-            new_version = f"v_{len(fs)+1}" + (f"_{addtion_name}" if addtion_name else "")
-            save_path = os.path.join(save_path, new_version)
-            os.mkdir(save_path)
-            fs.append({
-                "version":new_version,
-                "save_time": str(datetime.datetime.now()),
-                "dataset_path": dataset_path,
-                "model_path": save_path,
-                "config": {
-                    "base_model_name": self.base_model_name,
-                    "use_lora": self.use_lora,
-                    "loss": loss,
-                    "num_outputs": self.num_outputs,
-                    "max_length": config.generation.max_new_tokens,
-                    "learning_rate": optimizer.param_groups[0]['lr'] if optimizer is not None else None,
-                    "epoch": epoch,
-                    "step": step,
-                    "batch_size": batch_size,
-                }
-            })
-            with open(index_json_path, "w") as f:
-                json.dump(fs, f, indent=2)
+        index_path = os.path.join(save_path, "index.json")
+        try:
+            with open(index_path, "r") as f:
+                content = f.read().strip()
+                if content:
+                    fs = json.loads(content)
+                else:
+                    fs = []
+        except (json.JSONDecodeError, FileNotFoundError):
+            fs = []
+            logger.warning(f"No valid index file found at {index_path}, starting new index.")
+            
+        logger.info(f"Existing versions found: {len(fs)}")
+        if addtion_name is not None:
+            logger.info(f"Adding addition name: {addtion_name}")
+            new_version_dir = f"v{len(fs)}_{addtion_name}"
+        else:
+            new_version_dir = f"v{len(fs)+1}"
+
+        save_path = os.path.join(save_path, new_version_dir)
+        os.makedirs(save_path, exist_ok=True)
+        fs.append({
+            "version":new_version_dir,
+            "save_time": str(datetime.datetime.now()),
+            "dataset_path": str(dataset_path),
+            "model_path": save_path,
+            "config": {
+                "base_model_name": self.base_model_name,
+                "use_lora": self.use_lora,
+                "loss": loss,
+                "num_outputs": self.num_outputs,
+                "max_length": config.generation.max_new_tokens,
+                "learning_rate": optimizer.param_groups[0]['lr'] if optimizer is not None else None,
+                "epoch": epoch,
+                "step": step,
+                "batch_size": batch_size,
+            }
+        })
+        with open(index_path, "w+") as f:
+            json.dump(fs, f, indent=2)
                 
         if self.use_lora:
             # Save LoRA adapters

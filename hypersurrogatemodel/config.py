@@ -18,6 +18,8 @@ class ModelConfig:
     pretrained_model: str = "google/gemma-3-270m-it"
     use_lora: bool = True
     device: str = "auto"
+    num_outputs: int = 1
+    
 
 
 @dataclass
@@ -156,6 +158,7 @@ class ConfigManager:
             pretrained_model=self._get_config_value("model", "pretrained_model", "google/gemma-2-2b-it"),
             use_lora=self._get_config_value("model", "use_lora", True, bool),
             device=self._get_config_value("model", "device", "auto"),
+            num_outputs=self._get_config_value("model", "num_outputs", 1, int),
         )
 
     def _create_generation_config(self) -> GenerationConfig:
@@ -228,6 +231,7 @@ class ConfigManager:
                 "pretrained_model": self.model.pretrained_model,
                 "use_lora": self.model.use_lora,
                 "device": self.model.device,
+                "num_outputs": self.model.num_outputs,
             },
             "generation": {
                 "max_new_tokens": self.generation.max_new_tokens,
@@ -261,18 +265,18 @@ class ConfigManager:
                 "save_files": self.logging.save_files,
                 "output_dir": self.logging.output_dir,
             },
-            "dataset": {
-                "max_length": self.dataset.max_length,
-                "padding": self.dataset.padding,
-                "truncation": self.dataset.truncation,
-                "template_type": self.dataset.template_type,
-            },
-            "comparison": {
-                "method": self.comparison.method,
-                "batch_size": self.comparison.batch_size,
-                "similarity_threshold": self.comparison.similarity_threshold,
-                "tuning_strategy": self.comparison.tuning_strategy,
-            },
+            # "dataset": {
+            #     "max_length": self.dataset.max_length,
+            #     "padding": self.dataset.padding,
+            #     "truncation": self.dataset.truncation,
+            #     "template_type": self.dataset.template_type,
+            # },
+            # "comparison": {
+            #     "method": self.comparison.method,
+            #     "batch_size": self.comparison.batch_size,
+            #     "similarity_threshold": self.comparison.similarity_threshold,
+            #     "tuning_strategy": self.comparison.tuning_strategy,
+            # },
         }
     
     def save_config(self, path: Optional[Union[str, Path]] = None):

@@ -7,7 +7,7 @@ from hypersurrogatemodel import Logger
 logger = Logger("QUickInterface")
 logger.setFunctionsName("eval")
 
-local_model_path = "./saved_model"
+local_model_path = "./saved_model/v_1_continued"
 tokenizer = AutoTokenizer.from_pretrained(local_model_path)
 model = AutoModelForCausalLM.from_pretrained(local_model_path)
 
@@ -47,7 +47,7 @@ with open("./data/processed/NAS_bench_201/cifar10_cleaned.json", "r") as f:
     data = json.load(f)
 
 results = []
-for item in data[:1]:
+for item in data:
     print(f"Processing item: {item['text']}...")
     input_ids = tokenizer(item['text'], return_tensors="pt").input_ids
     

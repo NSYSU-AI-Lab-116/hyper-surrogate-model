@@ -9,6 +9,7 @@ from hypersurrogatemodel import (
     TrainableLLM, 
     Logger,
 )
+from hypersurrogatemodel.config import config
 
 logger = Logger("Pipelined-runner")
 torch.set_float32_matmul_precision('high')
@@ -166,8 +167,4 @@ def train_with_dataset(dataset_path, model_path="./saved_model", epochs=6, batch
 
 if __name__ == "__main__":
     train_with_dataset(dataset_path=Path("/home/alvin/hyper-surrogate-model/data/processed/NAS_bench_201/cifar10_cleaned.json"),
-                       epochs=12, batch_size=16, learning_rate=1e-5)
-    
-    
-    
-    
+                       epochs=config.training.num_epochs, batch_size=config.training.batch_size, learning_rate=config.training.learning_rate)

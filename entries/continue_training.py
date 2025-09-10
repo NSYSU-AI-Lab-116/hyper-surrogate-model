@@ -5,6 +5,7 @@ import json
 from torch.optim import AdamW
 from tqdm import tqdm
 from pathlib import Path
+from typing import Optional, List, Dict, Any
 from hypersurrogatemodel import (
     Logger, 
     TrainableLLM, 
@@ -63,7 +64,9 @@ class ModelWithCustomHead(TrainableLLM):
         return result
 
 def continue_training(
-    model_path="./saved_model", 
+    model_path="./saved_model/v1", 
+    save_path="./saved_model",
+    addition_name:Optional[str] =None,
     dataset_path="./data/processed/NAS_bench_201/cifar10_cleaned.json",
     epochs=config.training.num_epochs, 
     batch_size=config.training.batch_size, 
@@ -201,14 +204,9 @@ def continue_training(
             'Epoch Avg Loss': f'{avg_loss:.4f}',
         })
     
-    # Save continued training model
-    save_path = f"{model_path}_continued"
-    Path(save_path).mkdir(exist_ok=True)
-    
-    logger.info(f"Saving continued model to {save_path}")
-    
     # Save base model
-    model.save_model(save_path=model_path, 
+    model.save_model(save_path=save_path, 
+                    addtion_name=addition_name,
                     save_training_state=True,
                     optimizer=optimizer,
                     epoch=epochs,
@@ -258,12 +256,15 @@ def test_continued_model(model_path="./saved_model_continued"):
 
 if __name__ == "__main__":
     # Continue training from saved model
+    base_dir = Path(__file__).parent.parent
     continued_model = continue_training(
-        model_path="./saved_model/v_1",
-        dataset_path="./data/processed/NAS_bench_201/cifar100_cleaned.json",
-        epochs=12,
-        batch_size=8,
-        learning_rate=1e-5
+        model_path=str(base_dir / "saved_model/v1"),
+        save_path=str(base_dir / "saved_model"),
+        addition_name="continued",
+        dataset_path=str(base_dir / "data/processed/NAS_bench_201/cifar100_cleaned.json"),
+        epochs=config.training.num_epochs,
+        batch_size=config.training.batch_size,
+        learning_rate=config.training.learning_rate
     )
     
     # Test the continued model

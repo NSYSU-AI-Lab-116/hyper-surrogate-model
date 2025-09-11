@@ -11,15 +11,13 @@ from transformers import (
     TrainingArguments,
     Trainer,
     DataCollatorWithPadding,
-    DataCollatorForLanguageModeling,
     EarlyStoppingCallback,
 )
-from datasets import Dataset, DatasetDict
+from datasets import Dataset
 import numpy as np
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support, classification_report
 from pathlib import Path
 import json
-import wandb
 from tqdm import tqdm
 from torch.utils.data import DataLoader
 import torch
@@ -161,8 +159,6 @@ class GenerationTrainer:
         model: TrainableLLM,
         tokenizer,
         output_dir: str = "./results",
-        use_wandb: bool = False,
-        wandb_project: str = "hypersurrogatemodel-generation",
         save_files: bool = True,
     ):
         """
@@ -181,10 +177,6 @@ class GenerationTrainer:
         self.output_dir = Path(output_dir)
         if self.save_files:
             self.output_dir.mkdir(parents=True, exist_ok=True)
-        
-        self.use_wandb = use_wandb
-        if use_wandb:
-            wandb.init(project=wandb_project)
     
     def train(
         self,
@@ -228,7 +220,6 @@ class GenerationTrainer:
                 load_best_model_at_end=True if eval_dataset else False,
                 metric_for_best_model="eval_f1" if eval_dataset else None,
                 greater_is_better=True,
-                report_to="wandb" if self.use_wandb else [],
                 dataloader_pin_memory=False,  # For MPS compatibility
                 remove_unused_columns=False,  # 保留所有欄位
             )

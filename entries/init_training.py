@@ -15,7 +15,7 @@ logger = Logger("Pipelined-runner")
 torch.set_float32_matmul_precision('high')
 
 
-def train_with_dataset(dataset_path, model_path="./saved_model", epochs=6, batch_size=16, learning_rate=1e-5):
+def train_with_dataset(model_path, dataset_path, epochs, batch_size, learning_rate):
     with open(dataset_path, 'r') as f:
         train_data = json.load(f)
     train_length = len(train_data) 
@@ -30,7 +30,7 @@ def train_with_dataset(dataset_path, model_path="./saved_model", epochs=6, batch
         task_type="regression",  # numerical prediction 
         num_outputs=1,
         use_lora=True,
-        base_model_name="google/gemma-3-270m-it",
+        base_model_name=model_path,
     )
     
     optimizer = AdamW(model.parameters(), lr=learning_rate)
@@ -113,7 +113,7 @@ def train_with_dataset(dataset_path, model_path="./saved_model", epochs=6, batch
             
             loss.backward()
             optimizer.step()
-            if global_batch_count % 10 == 0:
+            if global_batch_count % 5 == 0:
                 torch.cuda.empty_cache()
             
             total_loss += loss.item()
@@ -126,7 +126,6 @@ def train_with_dataset(dataset_path, model_path="./saved_model", epochs=6, batch
             total_pbar.update(len(batch_data))
             total_pbar.set_postfix({
                 'Avg Loss': f'{current_avg_loss:6.3f}',
-                'Epoch': f'{epoch+1}/{epochs}'
             })
             
             # batch progress bar 
@@ -135,9 +134,7 @@ def train_with_dataset(dataset_path, model_path="./saved_model", epochs=6, batch
             })
             
         
-        # cloase batch progress bar
         batch_pbar.close()
-        
         avg_loss = total_loss / num_batches if num_batches > 0 else 0
         torch.cuda.empty_cache()
         
@@ -146,25 +143,28 @@ def train_with_dataset(dataset_path, model_path="./saved_model", epochs=6, batch
             'Epoch Avg Loss': f'{avg_loss:.4f}',
         })
 
-    
+    logger.success("Training complete")
     epoch_pbar.close()
     total_pbar.close()
     
-    if model_path:
-        try:
-            model.save_model(save_path=model_path, 
-                            save_training_state=True,
-                            optimizer=optimizer,
-                            epoch=epochs,
-                            dataset_path=dataset_path,
-                            batch_size=batch_size,
-                            )
-        except Exception as e:
-            logger.error(f"cannot save model: {e}")
+
+    try:
+        model.save_model(save_training_state=True,
+                        optimizer=optimizer,
+                        epoch=epochs,
+                        dataset_path=dataset_path,
+                        batch_size=batch_size,
+                        )
+    except Exception as e:
+        logger.error(f"cannot save model: {e}")
     
     logger.success("Finish training")
     return model
 
 if __name__ == "__main__":
-    train_with_dataset(dataset_path=Path("/home/alvin/hyper-surrogate-model/data/processed/NAS_bench_201/cifar10_cleaned.json"),
-                       epochs=config.training.num_epochs, batch_size=config.training.batch_size, learning_rate=config.training.learning_rate)
+    train_with_dataset(
+        model_path=config.model.pretrained_model,
+        dataset_path=config.dataset.dataset_path,
+        epochs=config.training.num_epochs, 
+        batch_size=config.training.batch_size, 
+        learning_rate=config.training.learning_rate)

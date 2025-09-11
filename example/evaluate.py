@@ -2,12 +2,16 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 import torch
 import torch.nn as nn
 import json 
+import tqdm
 from hypersurrogatemodel import Logger
+from hypersurrogatemodel.config import config 
 
 logger = Logger("QUickInterface")
 logger.setFunctionsName("eval")
 
-local_model_path = "./saved_model/v_1_continued"
+local_model_path = config.model.transfer_model_path 
+if not local_model_path:
+    raise ValueError("Please set 'transfer_model_path' in the config file.")
 tokenizer = AutoTokenizer.from_pretrained(local_model_path)
 model = AutoModelForCausalLM.from_pretrained(local_model_path)
 
@@ -42,15 +46,17 @@ class ModelWithCustomHead(nn.Module):
 
 combined_model = ModelWithCustomHead(model, f"{local_model_path}/numerical_head.pt")
 combined_model.eval()
-
+combined_model.to("cuda" if torch.cuda.is_available() else "cpu")
 with open("./data/processed/NAS_bench_201/cifar10_cleaned.json", "r") as f:
     data = json.load(f)
 
 results = []
+logger.info(f"Evaluating {len(data)} items...")
+
+progress_bar = tqdm.tqdm(data,desc=f"{"Overall":8}")
 for item in data:
-    print(f"Processing item: {item['text']}...")
     input_ids = tokenizer(item['text'], return_tensors="pt").input_ids
-    
+    input_ids = input_ids.to("cuda" if torch.cuda.is_available() else "cpu")
     with torch.no_grad():
         prediction = combined_model(input_ids)
         result = prediction['numerical_output'].cpu().numpy().tolist()
@@ -59,9 +65,10 @@ for item in data:
             'input': item['text'],
             'prediction': result
         })
-        
-        logger.info(f"Input: {item['text'][:50]}...")
-        logger.info(f"Prediction: {result}")
+    progress_bar.update(1)
+progress_bar.close()
 
+logger.info("Evaluation completed! Saving results...")
 with open("./data/results/predictions.json", "w") as f:
     json.dump(results, f, indent=2)
+logger.info("Results saved to ./data/results/predictions.json")

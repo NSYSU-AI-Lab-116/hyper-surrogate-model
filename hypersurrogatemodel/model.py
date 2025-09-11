@@ -11,6 +11,8 @@ import warnings
 # 設置環境變量和警告過濾以減少不必要的警告
 os.environ['TRANSFORMERS_VERBOSITY'] = 'error'
 os.environ['TOKENIZERS_PARALLELISM'] = 'false'  # 避免多進程問題
+os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
+
 # 過濾特定的 transformers 警告
 warnings.filterwarnings("ignore", message=".*generation flags.*not valid.*")
 warnings.filterwarnings("ignore", message=".*cache_implementation.*")
@@ -81,7 +83,7 @@ class TrainableLLM(nn.Module):
                     f"top_p={config.generation.top_p}")
         
         self.model = AutoModelForCausalLM.from_pretrained(
-            self.base_model_name,
+            self.base_model_name, #type: ignore
             torch_dtype=torch.float32,
             device_map=None, 
             trust_remote_code=True,
@@ -346,9 +348,7 @@ class TrainableLLM(nn.Module):
         return self.tokenizer
     
     def save_model(
-        self, 
-        save_path: str, 
-        addtion_name: Optional[str] = None,
+        self,
         save_training_state: bool = True, 
         optimizer: Optional[torch.optim.Optimizer] = None,
         scheduler: Optional[Any] = None,
@@ -359,7 +359,6 @@ class TrainableLLM(nn.Module):
         batch_size: Optional[int] = None
         ) -> None:
         
-        logger.step(f"Saving model to {save_path}...")
         """
         Save the model and optionally training state.
         
@@ -372,28 +371,16 @@ class TrainableLLM(nn.Module):
             step: Current step
             loss: Current loss
         """
-        os.makedirs(save_path, exist_ok=True)
+        logger.setFunctionsName("save_model")
+        if not hasattr(config.path, 'save_basepath') or config.path.save_basepath is None:
+            raise ValueError("Save path not configured in config.path.save_basepath")
+        save_path = config.path.save_basepath
+        
+        new_version_dir = config.path.new_version_dir
+        index_path = config.path.index_path
+        fs = config.path.fs
+        logger.step(f"Saving model to {save_path}...")
         import datetime
-        index_path = os.path.join(save_path, "index.json")
-        try:
-            with open(index_path, "r") as f:
-                content = f.read().strip()
-                if content:
-                    fs = json.loads(content)
-                else:
-                    fs = []
-        except (json.JSONDecodeError, FileNotFoundError):
-            fs = []
-            logger.warning(f"No valid index file found at {index_path}, starting new index.")
-            
-        logger.info(f"Existing versions found: {len(fs)}")
-        if addtion_name is not None:
-            logger.info(f"Adding addition name: {addtion_name}")
-            new_version_dir = f"v{len(fs)}_{addtion_name}"
-        else:
-            new_version_dir = f"v{len(fs)+1}"
-
-        save_path = os.path.join(save_path, new_version_dir)
         os.makedirs(save_path, exist_ok=True)
         fs.append({
             "version":new_version_dir,
@@ -551,64 +538,6 @@ class TrainableLLM(nn.Module):
         
         return model, training_state
     
-    def save_checkpoint(self, checkpoint_path: str, 
-                       optimizer: torch.optim.Optimizer,
-                       scheduler: Optional[Any] = None,
-                       epoch: int = 0,
-                       step: int = 0,
-                       loss: float = 0.0) -> None:
-        """
-        Save a training checkpoint for resuming training.
-        
-        Args:
-            checkpoint_path: Path to save checkpoint
-            optimizer: Current optimizer
-            scheduler: Current scheduler (optional)
-            epoch: Current epoch
-            step: Current step
-            loss: Current loss
-        """
-        self.save_model(
-            save_path=checkpoint_path,
-            save_training_state=True,
-            optimizer=optimizer,
-            scheduler=scheduler,
-            epoch=epoch,
-            step=step,
-            loss=loss
-        )
-        logger.success(f"Checkpoint saved to {checkpoint_path}")
-    
-    @classmethod
-    def load_checkpoint(cls, checkpoint_path: str,
-                       optimizer: torch.optim.Optimizer,
-                       scheduler: Optional[Any] = None) -> tuple[Union["TrainableLLM", None], Dict[str, Any]]:
-        """
-        Load a training checkpoint to resume training.
-        
-        Args:
-            checkpoint_path: Path to checkpoint
-            optimizer: Optimizer to load state into
-            scheduler: Scheduler to load state into (optional)
-            
-        Returns:
-            Tuple of (TrainableLLM instance, training_state_dict)
-        """
-        model, training_state = cls.load_model(
-            load_path=checkpoint_path,
-            load_training_state=True,
-            optimizer=optimizer,
-            scheduler=scheduler
-        )
-        
-        if model is not None:
-            logger.success(f"Checkpoint loaded from {checkpoint_path}")
-            if training_state:
-                logger.info(f"Resuming from epoch {training_state.get('epoch', 0)}, "
-                           f"step {training_state.get('step', 0)}, "
-                           f"loss {training_state.get('loss', 0.0):.4f}")
-        
-        return model, training_state
     
     def get_model_info(self) -> Dict[str, Any]:
         """

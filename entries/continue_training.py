@@ -12,7 +12,7 @@ from hypersurrogatemodel import (
 )
 
 from hypersurrogatemodel.config import config
-logger = Logger("ContinueTraining")
+logger = Logger("Pipelined-runner")
 logger.setFunctionsName("train")
 
 class ModelWithCustomHead(TrainableLLM):
@@ -33,13 +33,13 @@ class ModelWithCustomHead(TrainableLLM):
         self.numerical_head.load_state_dict(custom_head_state)
     
     def forward(self, input_ids, attention_mask=None, numerical_targets=None, **kwargs):
-        # Get hidden states from base model
+        # Get hidden states
         outputs = self.base_model(input_ids, attention_mask=attention_mask, output_hidden_states=True, **kwargs)
         
-        # Use last hidden state for numerical head
+        #last hidden state -> numerical head
         last_hidden_state = outputs.hidden_states[-1]
         
-        # Handle attention mask for getting last token
+        # get last token from attention mask 
         if attention_mask is not None:
             sequence_lengths = attention_mask.sum(dim=1) - 1
             batch_size = last_hidden_state.size(0)
@@ -47,7 +47,7 @@ class ModelWithCustomHead(TrainableLLM):
         else:
             last_token_hidden = last_hidden_state[:, -1, :]
         
-        # Apply numerical head
+        #add numerical head
         numerical_output = self.numerical_head(last_token_hidden)
         
         result = {
@@ -64,10 +64,8 @@ class ModelWithCustomHead(TrainableLLM):
         return result
 
 def continue_training(
-    model_path="./saved_model/v1", 
-    save_path="./saved_model",
-    addition_name:Optional[str] =None,
-    dataset_path="./data/processed/NAS_bench_201/cifar10_cleaned.json",
+    model_path, 
+    dataset_path,
     epochs=config.training.num_epochs, 
     batch_size=config.training.batch_size, 
     learning_rate=config.training.learning_rate
@@ -175,7 +173,7 @@ def continue_training(
             optimizer.step()
             
             # clear cache
-            if global_batch_count % 10 == 0:
+            if global_batch_count % 5 == 0:
                 torch.cuda.empty_cache()
                 
                 
@@ -203,18 +201,14 @@ def continue_training(
         epoch_pbar.set_postfix({
             'Epoch Avg Loss': f'{avg_loss:.4f}',
         })
-    
+    logger.success("Continue training completed!")
     # Save base model
-    model.save_model(save_path=save_path, 
-                    addtion_name=addition_name,
-                    save_training_state=True,
+    model.save_model(save_training_state=True,
                     optimizer=optimizer,
                     epoch=epochs,
                     dataset_path=dataset_path,
                     batch_size=batch_size,
                     )
-    
-    logger.success(f"Model saved successfully to {save_path}")
     
     return model
 
@@ -258,10 +252,8 @@ if __name__ == "__main__":
     # Continue training from saved model
     base_dir = Path(__file__).parent.parent
     continued_model = continue_training(
-        model_path=str(base_dir / "saved_model/v1"),
-        save_path=str(base_dir / "saved_model"),
-        addition_name="continued",
-        dataset_path=str(base_dir / "data/processed/NAS_bench_201/cifar100_cleaned.json"),
+        model_path=config.model.transfer_model_path,
+        dataset_path=config.dataset.dataset_path,
         epochs=config.training.num_epochs,
         batch_size=config.training.batch_size,
         learning_rate=config.training.learning_rate
@@ -270,4 +262,4 @@ if __name__ == "__main__":
     # Test the continued model
     #test_results = test_continued_model("./saved_model_continued")
     
-    logger.success("Continue training completed!")
+    

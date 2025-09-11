@@ -3,7 +3,7 @@ import pandas as pd
 import json
 import os
 from pathlib import Path
-
+from hypersurrogatemodel.config import config
 logger = Logger("DataReconstruct")
 
 class log_iterator():
@@ -75,4 +75,4 @@ def NAS_bench_201(part = -1):
     return pathjoint
 
 if __name__ == "__main__":
-    NAS_bench_201()
+    NAS_bench_201(config.dataset.dataset_partition)

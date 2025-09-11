@@ -7,16 +7,17 @@ that supports YAML files, environment variables, and default values.
 
 import os
 import yaml
+import json
 from typing import Dict, Any, Optional, Union
 from pathlib import Path
 from dataclasses import dataclass, field
 
-
 @dataclass
 class ModelConfig:
     """Model configuration settings."""
-    pretrained_model: str = "google/gemma-3-270m-it"
-    use_lora: bool = True
+    pretrained_model:Optional[str] = "google/gemma-3-270m-it"
+    transfer_model_path: Optional[str] = None
+    use_lora: bool = False
     device: str = "auto"
     num_outputs: int = 1
     
@@ -57,22 +58,18 @@ class LoRAConfig:
 
 
 @dataclass
-class LoggingConfig:
-    """Logging configuration settings."""
-    level: str = "INFO"
-    use_wandb: bool = False
-    wandb_project: str = "hypersurrogatemodel"
-    save_files: bool = True
-    output_dir: str = "./results"
-
-
-@dataclass
 class DatasetConfig:
     """Dataset configuration settings."""
     max_length: int = 512
     padding: str = "max_length"
     truncation: bool = True
     template_type: str = "generation"
+    dataset_partition: int = -1
+    dataset_path: str|None = None 
+    
+    def __post_init__(self):
+        if self.dataset_path is None:
+            raise ValueError("dataset_path cannot be None")
 
 
 @dataclass
@@ -83,6 +80,40 @@ class ComparisonConfig:
     similarity_threshold: float = 0.8
     tuning_strategy: str = "error_focused"
 
+@dataclass
+class PathConfig:
+    """Path configuration settings."""
+    save_basepath: str| None = None
+    addition_name: Optional[str] = None
+    log_path: str = ".logs"
+    index_path: str = field(init=False)
+    fs: list[dict[str,Any]] = field(init=False, default_factory=list)
+    new_version_dir: str = field(init=False)
+
+    def __post_init__(self):
+        if self.save_basepath is None:
+            raise ValueError("save_basepath cannot be None")
+        self.index_path = os.path.join(self.save_basepath, "index.json")
+        
+        os.makedirs(self.save_basepath, exist_ok=True) 
+        self.index_path:str = os.path.join(self.save_basepath, "index.json")
+        try:
+            with open(self.index_path, "r") as f:
+                content = f.read().strip()
+                if content:
+                    self.fs:list[dict[str,Any]] = json.loads(content)
+                else:
+                    self.fs = []
+        except (json.JSONDecodeError, FileNotFoundError):
+            self.fs = []
+        
+        self.fs_len = len(self.fs)
+        if self.addition_name is not None:
+            self.new_version_dir = f"v{self.fs_len}_{self.addition_name}"
+        else:
+            self.new_version_dir = f"v{self.fs_len+1}"
+        self.save_basepath = os.path.join(self.save_basepath, self.new_version_dir)
+        self.log_path = os.path.join("logs",self.log_path)
 
 class ConfigManager:
     """
@@ -111,9 +142,9 @@ class ConfigManager:
         self.generation = self._create_generation_config()
         self.training = self._create_training_config()
         self.lora = self._create_lora_config()
-        self.logging = self._create_logging_config()
         self.dataset = self._create_dataset_config()
         self.comparison = self._create_comparison_config()
+        self.path = self._create_path_config()
     
     def _load_config(self):
         """Load configuration from YAML file."""
@@ -156,6 +187,7 @@ class ConfigManager:
         """Create model configuration."""
         return ModelConfig(
             pretrained_model=self._get_config_value("model", "pretrained_model", "google/gemma-2-2b-it"),
+            transfer_model_path=self._get_config_value("model", "transfer_model_path", None),
             use_lora=self._get_config_value("model", "use_lora", True, bool),
             device=self._get_config_value("model", "device", "auto"),
             num_outputs=self._get_config_value("model", "num_outputs", 1, int),
@@ -196,15 +228,6 @@ class ConfigManager:
             target_modules=self._get_config_value("lora", "target_modules", default_target_modules, list),
         )
     
-    def _create_logging_config(self) -> LoggingConfig:
-        """Create logging configuration."""
-        return LoggingConfig(
-            level=self._get_config_value("logging", "level", "INFO"),
-            use_wandb=self._get_config_value("logging", "use_wandb", False, bool),
-            wandb_project=self._get_config_value("logging", "wandb_project", "hypersurrogatemodel"),
-            save_files=self._get_config_value("logging", "save_files", True, bool),
-            output_dir=self._get_config_value("logging", "output_dir", "./results"),
-        )
     
     def _create_dataset_config(self) -> DatasetConfig:
         """Create dataset configuration."""
@@ -213,6 +236,8 @@ class ConfigManager:
             padding=self._get_config_value("dataset", "padding", True, bool),
             truncation=self._get_config_value("dataset", "truncation", True, bool),
             template_type=self._get_config_value("dataset", "template_type", "structured"),
+            dataset_partition=self._get_config_value("dataset", "dataset_partition", -1, int),
+            dataset_path=self._get_config_value("dataset", "dataset_path", None, str)
         )
     
     def _create_comparison_config(self) -> ComparisonConfig:
@@ -224,11 +249,20 @@ class ConfigManager:
             tuning_strategy=self._get_config_value("comparison", "tuning_strategy", "error_focused"),
         )
     
+    def _create_path_config(self) -> PathConfig:
+        """Create path configuration."""
+        return PathConfig(
+            save_basepath=self._get_config_value("paths", "save_basepath", "./saved_model", str),
+            addition_name=self._get_config_value("paths", "addition_name", None),
+            log_path=self._get_config_value("paths", "log_path", ".logs", str),
+        )
+    
     def to_dict(self) -> Dict[str, Any]:
         """Convert configuration to dictionary."""
         return {
             "model": {
                 "pretrained_model": self.model.pretrained_model,
+                "transfer_model_path": self.model.transfer_model_path,
                 "use_lora": self.model.use_lora,
                 "device": self.model.device,
                 "num_outputs": self.model.num_outputs,
@@ -258,25 +292,27 @@ class ConfigManager:
                 "lora_dropout": self.lora.lora_dropout,
                 "target_modules": self.lora.target_modules,
             },
-            "logging": {
-                "level": self.logging.level,
-                "use_wandb": self.logging.use_wandb,
-                "wandb_project": self.logging.wandb_project,
-                "save_files": self.logging.save_files,
-                "output_dir": self.logging.output_dir,
+            "dataset": {
+                "max_length": self.dataset.max_length,
+                "padding": self.dataset.padding,
+                "truncation": self.dataset.truncation,
+                "template_type": self.dataset.template_type,
+                "dataset_partition": self.dataset.dataset_partition,
+                "dataset_path":self.dataset.dataset_path
             },
-            # "dataset": {
-            #     "max_length": self.dataset.max_length,
-            #     "padding": self.dataset.padding,
-            #     "truncation": self.dataset.truncation,
-            #     "template_type": self.dataset.template_type,
-            # },
             # "comparison": {
             #     "method": self.comparison.method,
             #     "batch_size": self.comparison.batch_size,
             #     "similarity_threshold": self.comparison.similarity_threshold,
             #     "tuning_strategy": self.comparison.tuning_strategy,
             # },
+            "paths": {
+                "save_basepath": self.path.save_basepath,
+                "addition_name": self.path.addition_name,
+                "log_path": self.path.log_path,
+                "index_path": self.path.index_path,
+                "fs": self.path.fs
+            }
         }
     
     def save_config(self, path: Optional[Union[str, Path]] = None):

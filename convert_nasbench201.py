@@ -1,13 +1,11 @@
-# convert_nasbench201.py
 import time
 from pathlib import Path
 import torch
 
-# ==== 路徑設定：本機來源 -> 本機乾淨版 ====
 SRC = Path(r"C:/aiLab/data/NAS-Bench-201-v1_1-096897.pth")
-DST = Path(r"C:/aiLab/data/nasbench201_clean.pth")           # 乾淨版輸出
+DST = Path(r"C:/aiLab/data/nasbench201_clean.pth")
 
-# 若你仍想讓程式自動回退找 OneDrive 的來源，可以加上這個候補路徑：
+# 若仍想讓程式自動回退找 OneDrive 的來源，可以加上這個候補路徑：
 CANDIDATES = [
     SRC,
     Path(r"C:/Users/ASUS/OneDrive/Desktop/aiLab/hyper-surrogate-model/data/NAS-Bench-201-v1_1-096897.pth"),
@@ -20,9 +18,6 @@ def find_existing(paths):
     raise FileNotFoundError("找不到來源檔，請確認路徑。")
 
 def allowlist_numpy_scalars():
-    """
-    將常見的 numpy 型別加入安全白名單，讓 weights_only=True 可以順利載入。
-    """
     try:
         import numpy as np
         from numpy.core.multiarray import scalar as np_scalar
@@ -32,10 +27,6 @@ def allowlist_numpy_scalars():
         print(f"[warn] allowlist 設定時出現問題：{e}（會照常嘗試載入）")
 
 def safe_torch_load(path: Path):
-    """
-    優先嘗試 weights_only=True（安全），失敗則加入 allowlist 後重試。
-    最後一步才允許使用不安全模式（你必須確定來源可信）。
-    """
     t0 = time.time()
     # 1) 直接安全讀
     try:
@@ -46,7 +37,6 @@ def safe_torch_load(path: Path):
     except Exception as e:
         print(f"[load] weights_only=True 失敗：{e}")
 
-    # 2) 加入 numpy allowlist 後再試一次
     try:
         allowlist_numpy_scalars()
         t1 = time.time()
@@ -57,8 +47,6 @@ def safe_torch_load(path: Path):
     except Exception as e:
         print(f"[load] retry 仍失敗：{e}")
 
-    # 3) 最後手段：不安全模式（僅在「來源100%可信」時使用）
-    # —— NAS-Bench-201 官方檔若你是自行下載未改動，通常可視為可信。
     print("[warn] 將回退至 weights_only=False（不安全）。請**確認來源可信**後再繼續。")
     t2 = time.time()
     obj = torch.load(path, map_location="cpu", weights_only=False)

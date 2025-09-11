@@ -1,5 +1,12 @@
+path:
+  save_basepath: "saved_model"
+  addition_name: null # Optional additional name for the saved model directory
+  log_path: ".log"
+
 model:
-  pretrained_model: "google/gemma-3-270m-it"
+  trainsource: "local"
+  pretrained_model: "google/gemma-3-270m-it" # "google/gemma-3-270m-it" / Model path
+  transfer_model_path: "saved_model/v1" # Path to the model to continue training from
   use_lora: true
   device: "auto"
   num_outputs: 1 #Available for regression tasks
@@ -14,7 +21,6 @@ generation:
   #repetition_penalty: 1.1
   #length_penalty: 1.0
   #num_beams: 1
-
 
 training:
   batch_size: 16
@@ -33,21 +39,14 @@ lora:
     - "k_proj"
     - "o_proj"
 
-logging:
-  #wandb_project: "hypersurrogatemodel"
-  save_files: true
-  output_dir: "./results"
 
-
-# dataset:
-#   # 最大序列長度
-#   max_length: 512
-#   # 填充策略
-#   padding: "max_length"
-#   # 截斷
-#   truncation: true
-#   # 提示模板類型
-#   template_type: "generation"
+dataset:
+  dataset_partition: -1
+  dataset_path: "data/processed/NAS_bench_201/cifar10_cleaned.json"
+  max_length: 512
+  padding: "max_length"
+  # truncation: true
+  # template_type: "generation"
 
 # comparison:
 #   # 比較方法 (exact_match, similarity, structured)

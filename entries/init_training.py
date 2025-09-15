@@ -10,6 +10,8 @@ from hypersurrogatemodel import (
     Logger,
 )
 from hypersurrogatemodel.config import config
+import numpy as np
+from sklearn.model_selection import train_test_split
 
 logger = Logger("Pipelined-runner")
 torch.set_float32_matmul_precision('high')
@@ -17,9 +19,28 @@ torch.set_float32_matmul_precision('high')
 
 def train_with_dataset(dataset_path, model_path="./saved_model", epochs=6, batch_size=16, learning_rate=1e-5):
     with open(dataset_path, 'r') as f:
-        train_data = json.load(f)
+        full_data = json.load(f)
+        
+    logger.info("Performing train-test split (80/20)...")
+    train_data, test_data = train_test_split(full_data, test_size=0.2, random_state=42)
+    test_data_path = "./data/processed/NAS_bench_201/cifar10_test_set.json"
+    with open(test_data_path, 'w') as f:
+        json.dump(test_data, f, indent=2)
+
     train_length = len(train_data) 
     logger.info(f"loaded {train_length} training samples")
+
+    logger.info("Calculating normalization parameters (mean/std)...")
+    all_answers = np.array([float(sample['answer']) for sample in train_data])
+    answer_mean = np.mean(all_answers)
+    answer_std = np.std(all_answers)
+    os.makedirs(model_path, exist_ok=True)
+    norm_params_path = os.path.join(model_path, "normalization_params.json")
+    with open(norm_params_path, 'w') as f:
+        json.dump({'mean': answer_mean, 'std': answer_std}, f, indent=2)
+    logger.success(f"Normalization parameters saved to {norm_params_path}")
+    logger.info(f"  - Mean: {answer_mean:.4f}")
+    logger.info(f"  - Std Dev: {answer_std:.4f}")
     
     batches_per_epoch = (len(train_data) + batch_size - 1) // batch_size
     total_batches = epochs * batches_per_epoch
@@ -80,10 +101,11 @@ def train_with_dataset(dataset_path, model_path="./saved_model", epochs=6, batch
             targets = []
             
             for sample in batch_data:
+                original_answer = float(sample['answer'])
+                normalized_answer = (original_answer - answer_mean) / answer_std
                 text = sample['text']
-                answer = float(sample['answer'])
                 texts.append(text)
-                targets.append(answer)
+                targets.append(normalized_answer)  # <- Normalization
             
             # Tokenize (with batch)
             inputs = model.tokenizer(
@@ -96,8 +118,8 @@ def train_with_dataset(dataset_path, model_path="./saved_model", epochs=6, batch
             )
             
             inputs = {k: v.to(device) for k, v in inputs.items()}
-            numerical_targets = torch.tensor(targets, device=device).unsqueeze(1)
-            
+            numerical_targets = torch.tensor(targets, dtype=torch.float32, device=device).unsqueeze(1)
+        
             optimizer.zero_grad()
 
             outputs = model.forward(
@@ -166,5 +188,5 @@ def train_with_dataset(dataset_path, model_path="./saved_model", epochs=6, batch
     return model
 
 if __name__ == "__main__":
-    train_with_dataset(dataset_path=Path("/home/alvin/hyper-surrogate-model/data/processed/NAS_bench_201/cifar10_cleaned.json"),
+    train_with_dataset(dataset_path=Path("./data/processed/NAS_bench_201/cifar10_cleaned.json"),
                        epochs=config.training.num_epochs, batch_size=config.training.batch_size, learning_rate=config.training.learning_rate)

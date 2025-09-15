@@ -10,6 +10,7 @@ from hypersurrogatemodel import (
     Logger,
 )
 from hypersurrogatemodel.config import config
+from hypersurrogatemodel.dataset import PromptTemplate
 import numpy as np
 from sklearn.model_selection import train_test_split
 
@@ -29,6 +30,20 @@ def train_with_dataset(dataset_path, model_path="./saved_model", epochs=6, batch
 
     train_length = len(train_data) 
     logger.info(f"loaded {train_length} training samples")
+
+    dataset_filename = Path(dataset_path).stem
+    if "cifar100" in dataset_filename:
+        dataset_key = "cifar100"
+    elif "cifar10" in dataset_filename:
+        dataset_key = "cifar10"
+    elif "ImageNet16-120" in dataset_filename:
+        dataset_key = "imagenet16-120"
+    else:
+        logger.warning(f"Could not determine dataset key from path: {dataset_path}. Defaulting to 'cifar10'.")
+        dataset_key = "cifar10"
+
+    logger.info(f"Determined dataset key as '{dataset_key}' for prompt generation.")
+    prompt_generator = PromptTemplate()
 
     logger.info("Calculating normalization parameters (mean/std)...")
     all_answers = np.array([float(sample['answer']) for sample in train_data])
@@ -103,8 +118,10 @@ def train_with_dataset(dataset_path, model_path="./saved_model", epochs=6, batch
             for sample in batch_data:
                 original_answer = float(sample['answer'])
                 normalized_answer = (original_answer - answer_mean) / answer_std
-                text = sample['text']
-                texts.append(text)
+                full_prompt = prompt_generator.format_prompt(
+                dataset_key=dataset_key,
+                architecture_string=sample['text'])
+                texts.append(full_prompt)
                 targets.append(normalized_answer)  # <- Normalization
             
             # Tokenize (with batch)

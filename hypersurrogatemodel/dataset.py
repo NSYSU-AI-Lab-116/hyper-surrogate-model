@@ -28,61 +28,72 @@ class PromptTemplate:
     """
     
     def __init__(self, template_type: str = "structured"):
-        """
-        Initialize prompt template.
-        
-        Args:
-            template_type: "generation")
-        """
-        self.template_type = template_type
-        self.templates = self._load_templates()
+        """Initialize prompt template."""
+        self._dataset_introductions, self._structure_template = self._load_templates()
     
-    def _load_templates(self) -> Dict[str, str]:
-        """Load predefined prompt templates."""
-        templates = {
-            "generation": 
-                """
-                    Please analys the below data and choose the most suitable surrogate model combination for training its archtechture within its domain.
-                    {text}
-                """,
-            "structured":
-                """
-                    Please analys the below data and give the most suitable accuracy of the structure, indicating its performance after trained.
-                    {text}
-                    
-                    Next, output the result with a structured JSON format as follows:
-                    {"accuracy":double}
-                    
-                """
-        }
-        return templates
+    def _load_templates(self) -> tuple[dict[str, str], str]:
+        """
+        Load predefined prompt components.
+        Returns a tuple containing:
+        1. A dictionary of dataset-specific introductions.
+        2. A final structure template for combining components.
+        """
+        introductions = {
+            "cifar10": """
+            **Task Description**
+            - **Domain**: Image Classification
+            - **Benchmark**: NAS-Bench-201
+            - **Dataset**: CIFAR-10
+            - **Dataset Characteristics**: A standard computer vision benchmark with 10 object classes in 32x32 pixel color images. Performance on this dataset indicates a model's general capability on basic classification.
+            - **Target Metric**: Final test accuracy after 200 epochs of training.
+            """,
+            "cifar100": """
+            **Task Description**
+            - **Domain**: Image Classification
+            - **Benchmark**: NAS-Bench-201
+            - **Dataset**: CIFAR-100
+            - **Dataset Characteristics**: A more challenging benchmark with 100 fine-grained classes in 32x32 pixel color images. This tests the architecture's ability to distinguish between visually similar objects.
+            - **Target Metric**: Final test accuracy after 200 epochs of training.
+            """,
+            "imagenet16-120": """
+            **Task Description**
+            - **Domain**: Image Classification
+            - **Benchmark**: NAS-Bench-201
+            - **Dataset**: ImageNet16-120
+            - **Dataset Characteristics**: A computationally efficient but difficult benchmark with 120 diverse classes in heavily down-sized 16x16 pixel images. This tests an architecture's performance under information-constrained conditions.
+            - **Target Metric**: Final test accuracy after 200 epochs of training.
+            """}
+        structure = """{introduction}
+        **Architecture String**
+        {architecture_string}
+        """
+        return introductions, structure
     
     def format_prompt(
         self,
-        template_type: Optional[str] = None,
-        **kwargs
+        dataset_key: str,
+        architecture_string: str
     ) -> str:
         """
-        Format a prompt using the specified template.
+        Format a prompt using a dataset-specific introduction.
         
         Args:
-            template_type: Type of template to use (overrides instance default)
-            **kwargs: Variables to fill in the template
+            dataset_key: The key for the dataset (e.g., 'cifar10').
+            architecture_string: The string describing the architecture.
             
         Returns:
-            Formatted prompt string
+            Formatted prompt string.
         """
-        template_type = template_type or self.template_type
+        if dataset_key not in self._dataset_introductions:
+            raise ValueError(f"Unknown dataset_key: '{dataset_key}'. "
+                            f"Please add it to PromptTemplate in dataset.py")
         
-        if template_type not in self.templates:
-            raise ValueError(f"Unknown template type: {template_type}")
+        introduction = self._dataset_introductions[dataset_key]
         
-        template = self.templates[template_type]
-        
-        try:
-            return template.format(**kwargs)
-        except KeyError as e:
-            raise ValueError(f"Missing required variable for template: {e}")
+        return self._structure_template.format(
+            introduction=introduction.strip(),
+            architecture_string=architecture_string
+        )
     
     def add_custom_template(self, name: str, template: str) -> None:
         """

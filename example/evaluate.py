@@ -5,24 +5,29 @@ import json
 from hypersurrogatemodel import Logger
 from tqdm import tqdm
 import os
-
+import re
+from pathlib import Path
 logger = Logger("QUickInterface")
 logger.setFunctionsName("eval")
 
-local_model_path = os.path.abspath("./saved_model/v5")
-tokenizer = AutoTokenizer.from_pretrained(local_model_path)
-model = AutoModelForCausalLM.from_pretrained(local_model_path)
+def find_latest_model_version(base_path: str) -> str | None:
+    """Finds the latest version directory in the saved model path."""
+    p = Path(base_path)
+    if not p.exists(): return None
+    version_dirs = [d for d in p.iterdir() if d.is_dir() and re.match(r'v\d+', d.name)]
+    if not version_dirs: return None
+    version_dirs.sort(key=lambda d: int(re.search(r'v(\d+)', d.name).group(1)), reverse=True)
+    return str(version_dirs[0])
 
-norm_params_path = os.path.join(os.path.dirname(local_model_path), "normalization_params.json")
-try:
-    with open(norm_params_path, 'r') as f:
-        norm_params = json.load(f)
-    answer_mean = norm_params['mean']
-    answer_std = norm_params['std']
-    logger.info(f"Successfully loaded normalization parameters from {norm_params_path}")
-except FileNotFoundError:
-    logger.error(f"Normalization parameters not found at {norm_params_path}. Please run training first.")
+base_model_path = os.path.abspath("./saved_model")
+latest_model_path = find_latest_model_version(base_model_path)
+if not latest_model_path:
+    logger.error(f"No trained model found in {base_model_path}")
     exit()
+
+logger.info(f"Loading latest model from: {latest_model_path}")
+tokenizer = AutoTokenizer.from_pretrained(latest_model_path)
+model = AutoModelForCausalLM.from_pretrained(latest_model_path)
 
 class ModelWithCustomHead(nn.Module):
     def __init__(self, base_model, custom_head_path):
@@ -49,7 +54,7 @@ class ModelWithCustomHead(nn.Module):
         
         return numerical_output
 
-combined_model = ModelWithCustomHead(model, f"{local_model_path}/numerical_head.pt")
+combined_model = ModelWithCustomHead(model, f"{latest_model_path}/numerical_head.pt")
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 combined_model.to(device)
 combined_model.eval()
@@ -60,23 +65,22 @@ logger.info(f"read {len(data)} data, start predicting.")
 
 
 results = []
-for item in tqdm(data, desc="Predicting"):
+for item in tqdm(data, desc="Generatingg scores"):
     #print(f"Processing item: {item['text']}...")
     input_ids = tokenizer(item['text'], return_tensors="pt").input_ids
     input_ids = input_ids.to(device)
     
     with torch.no_grad():
         prediction_tensor = combined_model(input_ids)
-        normalized_prediction = prediction_tensor.item() 
-        prediction_value = (normalized_prediction * answer_std) + answer_mean
-        
+        predicted_score = prediction_tensor.item()
         results.append({
-            'text': item['text'],
-            'answer': item['answer'], 
-            'prediction': prediction_value
+            "text": item['text'],
+            "true_answer": float(item['answer']),
+            "predicted_score": predicted_score  
         })
-        
 
-logger.info("Prediction finished.")
-with open("./data/results/predictions.json", "w") as f:
+output_path = Path(latest_model_path) / "predictions.json"
+with open(output_path, "w") as f:
     json.dump(results, f, indent=2)
+
+logger.success(f"Evaluation scores saved to {output_path}")

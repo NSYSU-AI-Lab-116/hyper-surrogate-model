@@ -11,11 +11,11 @@ from hypersurrogatemodel import (
 )
 from hypersurrogatemodel.config import config
 import numpy as np
+import random
 from sklearn.model_selection import train_test_split
 
 logger = Logger("Pipelined-runner")
 torch.set_float32_matmul_precision('high')
-
 
 def train_with_dataset(dataset_path, model_path="./saved_model", epochs=6, batch_size=16, learning_rate=1e-5):
     with open(dataset_path, 'r') as f:
@@ -30,17 +30,9 @@ def train_with_dataset(dataset_path, model_path="./saved_model", epochs=6, batch
     train_length = len(train_data) 
     logger.info(f"loaded {train_length} training samples")
 
-    logger.info("Calculating normalization parameters (mean/std)...")
-    all_answers = np.array([float(sample['answer']) for sample in train_data])
-    answer_mean = np.mean(all_answers)
-    answer_std = np.std(all_answers)
-    os.makedirs(model_path, exist_ok=True)
-    norm_params_path = os.path.join(model_path, "normalization_params.json")
-    with open(norm_params_path, 'w') as f:
-        json.dump({'mean': answer_mean, 'std': answer_std}, f, indent=2)
-    logger.success(f"Normalization parameters saved to {norm_params_path}")
-    logger.info(f"  - Mean: {answer_mean:.4f}")
-    logger.info(f"  - Std Dev: {answer_std:.4f}")
+    logger.info("Sorting training data by accuracy to prepare for ranking loss...")
+    train_data.sort(key=lambda x: float(x['answer']), reverse=True)
+    logger.success(f"Sorted {len(train_data)} training samples.")
     
     batches_per_epoch = (len(train_data) + batch_size - 1) // batch_size
     total_batches = epochs * batches_per_epoch
@@ -57,9 +49,15 @@ def train_with_dataset(dataset_path, model_path="./saved_model", epochs=6, batch
     optimizer = AdamW(model.parameters(), lr=learning_rate)
     device = next(model.model.parameters()).device
     model.train()
+
+    # ranking loss
+    loss_fn = torch.nn.MarginRankingLoss(margin=0.1)
+    logger.info(f"Using MarginRankingLoss with a margin of {loss_fn.margin}")
     
     logger.info(f"開始訓練 {epochs} 個 epochs，批次大小: {batch_size}")
     
+    num_pairs_per_epoch = len(train_data)
+    num_batches_per_epoch = (num_pairs_per_epoch + batch_size - 1) // batch_size
     # craeate epoch progress bar
     epoch_pbar = tqdm(
         range(epochs), 
@@ -71,24 +69,20 @@ def train_with_dataset(dataset_path, model_path="./saved_model", epochs=6, batch
     
     # Create overall progress bar
     total_pbar = tqdm(
-        total=train_length*epochs,
+        total=num_pairs_per_epoch*epochs,
         desc=f"{"Overall":8}",
-        unit="samples",
+        unit="pairs",
         position=1,
         leave=True
     )
-    
-    
-    global_batch_count = 0
     
     for epoch in epoch_pbar:
         total_loss = 0
         num_batches = 0
         
         # create batch progress bar
-        batch_indices = list(range(0, len(train_data), batch_size))
         batch_pbar = tqdm(
-            batch_indices,
+            range(num_batches_per_epoch),
             desc=f"{"Batch":8}",
             unit="batch",
             position=2,
@@ -96,79 +90,76 @@ def train_with_dataset(dataset_path, model_path="./saved_model", epochs=6, batch
         )
         
         for i in batch_pbar:
-            batch_data = train_data[i:i+batch_size]
-            texts = []
-            targets = []
+            good_prompts = []
+            bad_prompts = []
+            optimizer.zero_grad()
             
-            for sample in batch_data:
-                original_answer = float(sample['answer'])
-                normalized_answer = (original_answer - answer_mean) / answer_std
-                text = sample['text']
-                texts.append(text)
-                targets.append(normalized_answer)  # <- Normalization
+            # matching
+            current_batch_size = min(batch_size, num_pairs_per_epoch - (num_batches * batch_size))
+            if current_batch_size <= 0: continue
+
+            for _ in range(current_batch_size):
+                mid_point = len(train_data) // 2
+                if mid_point < 2: # At least two samples required
+                    good_sample = random.choice(train_data[:mid_point])
+                    bad_sample = random.choice(train_data[mid_point:])
+                
+                # hard pairwise
+                elif random.random() < 0.6: # adjustable
+                    # 
+                    idx1 = random.randint(0, mid_point - 2)
+                    idx2 = random.randint(idx1 + 1, mid_point - 1)
+                    
+                    good_sample = train_data[idx1]
+                    bad_sample = train_data[idx2]
+                    
+                # simple pairwise
+                else:
+                    good_sample = random.choice(train_data[:mid_point])
+                    bad_sample = random.choice(train_data[mid_point:])
+
+                good_prompts.append(good_sample['text'])
+                bad_prompts.append(bad_sample['text'])
+
+            if not good_prompts: continue
+
+            # get model scores
+            good_inputs = model.tokenizer(good_prompts, return_tensors="pt", padding=True, truncation=True, max_length=512)
+            bad_inputs = model.tokenizer(bad_prompts, return_tensors="pt", padding=True, truncation=True, max_length=512)
+
+            good_inputs = {k: v.to(device) for k, v in good_inputs.items()}
+            bad_inputs = {k: v.to(device) for k, v in bad_inputs.items()}
             
-            # Tokenize (with batch)
-            inputs = model.tokenizer(
-                texts, 
-                return_tensors="pt", 
-                padding=True,
-                truncation=True,
-                max_length=512,
-                return_attention_mask=True
-            )
-            
-            inputs = {k: v.to(device) for k, v in inputs.items()}
-            numerical_targets = torch.tensor(targets, dtype=torch.float32, device=device).unsqueeze(1)
-        
             optimizer.zero_grad()
 
-            outputs = model.forward(
-                input_ids=inputs["input_ids"],
-                attention_mask=inputs["attention_mask"],
-                numerical_targets=numerical_targets
-            )
-            
-            loss = outputs.get('loss', None)
-            if loss is None:
-                logger.error("get loss failed")
-                continue
+            good_scores = model.forward(**good_inputs)["numerical_outputs"]
+            bad_scores = model.forward(**bad_inputs)["numerical_outputs"]
+
+            # compute Ranking Loss
+            target = torch.ones_like(good_scores)
+            loss = loss_fn(good_scores, bad_scores, target)
             
             loss.backward()
             optimizer.step()
-            if global_batch_count % 10 == 0:
-                torch.cuda.empty_cache()
             
             total_loss += loss.item()
             num_batches += 1
-            global_batch_count += 1
-            
-            current_avg_loss = total_loss / num_batches
-            
-            # toverall progress bar
-            total_pbar.update(len(batch_data))
+
+            # Overall progress updated
+            total_pbar.update(len(good_prompts))
             total_pbar.set_postfix({
-                'Avg Loss': f'{current_avg_loss:6.3f}',
+                'Avg Loss': f'{(total_loss / num_batches):.4f}',
                 'Epoch': f'{epoch+1}/{epochs}'
             })
             
-            # batch progress bar 
-            batch_pbar.set_postfix({
-                'Batch loss': f'{current_avg_loss:6.3f}',
-            })
-            
-        
-        # cloase batch progress bar
+            # Batch progress
+            batch_pbar.set_postfix({'Ranking Loss': f'{(total_loss / num_batches):.4f}'})
+
         batch_pbar.close()
         
-        avg_loss = total_loss / num_batches if num_batches > 0 else 0
-        torch.cuda.empty_cache()
-        
-        # epoch progress bar 
-        epoch_pbar.set_postfix({
-            'Epoch Avg Loss': f'{avg_loss:.4f}',
-        })
+        avg_epoch_loss = total_loss / num_batches if num_batches > 0 else 0
+        epoch_pbar.set_postfix({'Epoch Avg Loss': f'{avg_epoch_loss:.4f}'})
 
-    
     epoch_pbar.close()
     total_pbar.close()
     

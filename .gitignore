@@ -22,3 +22,7 @@ wandb/
 
 # vscode
 .vscode/
+
+# dataset
+data/processed/NAS_bench_201_test
+data/processed/NAS_bench_201_train

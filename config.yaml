@@ -1,57 +1,53 @@
-path:
-  save_basepath: "saved_model"
-  addition_name: null # Optional additional name for the saved model directory
-  log_path: ".log"
-
-model:
-  trainsource: "local"
-  pretrained_model: "google/gemma-3-270m-it" # "google/gemma-3-270m-it" / Model path
-  transfer_model_path: "saved_model/v1" # Path to the model to continue training from
-  use_lora: true
-  device: "auto"
-  num_outputs: 1 #Available for regression tasks
-
-# 生成參數配置
+comparison:
+  batch_size: 8
+  method: similarity
+  similarity_threshold: 0.8
+  tuning_strategy: error_focused
+dataset:
+  dataset_partition: 10
+  train_data_path: data/processed/NAS_bench_201_train/cifar10_train.json
+  test_data_path: data/processed/NAS_bench_201_test/cifar10_test.json
+  max_length: 512
+  padding: max_length
+  preprocess_source_path: ./data/processed/master_dataset.parquet
+  preprocess_test_path: ./data/processed/NAS_bench_201_test
+  preprocess_train_path: ./data/processed/NAS_bench_201_train
+  template_type: generation
+  truncation: true
 generation:
+  do_sample: true
+  length_penalty: 1.0
   max_new_tokens: 256
-  #temperature: 0.7
-  #do_sample: true
-  #top_k: 64
-  #top_p: 0.95
-  #repetition_penalty: 1.1
-  #length_penalty: 1.0
-  #num_beams: 1
-
+  num_beams: 1
+  repetition_penalty: 1.1
+  temperature: 0.7
+  top_k: 64
+  top_p: 0.95
+lora:
+  lora_alpha: 32
+  lora_dropout: 0.1
+  r: 16
+  target_modules:
+  - q_proj
+  - v_proj
+  - k_proj
+  - o_proj
+model:
+  device: auto
+  num_outputs: 1
+  pretrained_model: google/gemma-3-270m-it
+  transfer_model_path: saved_model/v1
+  use_lora: true
+path:
+  addition_name: null
+  run_mode: data_process
+  save_basepath: saved_model
+run_mode:
+  mode: trans_train
 training:
   batch_size: 16
   learning_rate: 1e-5
   num_epochs: 12
-  #warmup_steps: 100
-  #weight_decay: 0.01
-
-lora:
-  r: 16
-  lora_alpha: 32
-  lora_dropout: 0.1
-  target_modules:
-    - "q_proj"
-    - "v_proj"
-    - "k_proj"
-    - "o_proj"
-
-
-dataset:
-  dataset_partition: -1
-  dataset_path: "data/processed/NAS_bench_201/cifar10_cleaned.json"
-  max_length: 512
-  padding: "max_length"
-  # truncation: true
-  # template_type: "generation"
-
-# comparison:
-#   # 比較方法 (exact_match, similarity, structured)
-#   method: "similarity"
-#   batch_size: 8
-#   similarity_threshold: 0.8
-#   # 調優策略 (error_focused, random_sampling, confidence_based)
-#   tuning_strategy: "error_focused"
+  radient_accumulation_steps: 1
+  warmup_steps: 100
+  weight_decay: 0.01

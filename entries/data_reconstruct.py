@@ -3,6 +3,7 @@ import pandas as pd
 import json
 import os
 from pathlib import Path
+from sklearn.model_selection import train_test_split
 from hypersurrogatemodel.config import config
 logger = Logger("DataReconstruct")
 
@@ -34,22 +35,28 @@ class DatasetStruct():
         self.datas = data
         self.partition = partition
     def data_cleaning (self):
-        self.answer = self.datas[["true_final_train_accuracy"]][:self.partition]
-        self.text = self.datas[['uid', 'unified_text_description']][:self.partition]
+        self.answers = self.datas["true_final_train_accuracy"][:self.partition].tolist()
+        self.text = self.datas[['uid', 'unified_text_description']][:self.partition].to_dict(orient='records')
         
-
-        answer_dict = self.answer.to_dict(orient='records')
-        data_dict = self.text.to_dict(orient='records')
-        self.wrapped_data = []
-        for data, answer in zip(data_dict, answer_dict):
-            self.wrapped_data.append({"text": str(data), "answer": answer["true_final_train_accuracy"]})  
-        logger.success("Data cleaned: reformat to json serializable")
+        self.train_x, self.test_x, self.train_y,  self.test_y = train_test_split(self.text, self.answers, test_size=0.2, random_state=42)
+        
+        for i in range(len(self.train_x)):
+            self.train_x[i]['true_acc'] = self.train_y[i]
+        logger.success(f"{self.data_name} Train data reformatted")
+        
+        for i in range(len(self.test_x)):
+            self.test_x[i]['true_acc'] = self.test_y[i]
+        logger.success(f"{self.data_name} Test data reformatted")
         
     
-    def save_to_json(self, file_path:str):
-        with open(file_path, 'w+') as f:
-            json.dump(self.wrapped_data, f, indent=2, ensure_ascii=False)
-        logger.success(f"DataFrame saved as JSON to {file_path}")
+    def save_to_json(self):
+        with open(os.path.join(config.dataset.preprocess_train_path,f'{self.data_name}_train.json'), 'w+') as ftr: # type: ignore
+            json.dump(self.train_x, ftr, indent=2, ensure_ascii=False)
+            logger.success(f"{self.data_name}_train saved as JSON to {config.dataset.preprocess_train_path}")
+
+        with open(os.path.join(config.dataset.preprocess_test_path,f'{self.data_name}_test.json'), 'w+') as fte:  # type: ignore
+            json.dump(self.test_x, fte, indent=2, ensure_ascii=False)
+            logger.success(f"{self.data_name}_test saved as JSON to {config.dataset.preprocess_test_path}")
     
 def NAS_bench_201(part = -1):
     logger.step("loading data set")
@@ -66,13 +73,11 @@ def NAS_bench_201(part = -1):
     except Exception as e:
         logger.error(str(e))
     
-    json_output_path = Path(os.getcwd()) / "data" / "processed" / "NAS_bench_201"
-    pathjoint = []
+    json_output_path = config.dataset.preprocess_train_path
+    logger.info(f"debug msg: json output path: {json_output_path}")
     for ds in dataset_union:
         ds.data_cleaning()
-        ds.save_to_json(json_output_path / f"{ds.data_name}_cleaned.json")
-        pathjoint.append(json_output_path / f"{ds.data_name}_cleaned.json")
-    return pathjoint
+        ds.save_to_json() # type: ignore
 
 if __name__ == "__main__":
-    NAS_bench_201(config.dataset.dataset_partition)
+    NAS_bench_201(config.dataset.dataset_partition) # type: ignore 

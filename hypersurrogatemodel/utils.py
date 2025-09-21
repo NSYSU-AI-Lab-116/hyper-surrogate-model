@@ -12,7 +12,6 @@ import logging
 import os 
 from typing import Dict, Any, List, Optional, Union
 from pathlib import Path
-from hypersurrogatemodel.config import config
 
 class ColoredFormatter(logging.Formatter):
     """
@@ -63,10 +62,9 @@ class Logger:
             level: Logging level
             use_colors: Enable colored console output
         """
-        self.log_file = config.path.log_path
         self.use_colors = use_colors
         self.function = "main"
-        
+        self.logfile = "log/.log"
         self.logger = logging.getLogger(name)
         self.logger.setLevel(getattr(logging, level.upper()))
         
@@ -81,8 +79,8 @@ class Logger:
         console_handler.setFormatter(console_formatter)
         self.logger.addHandler(console_handler)
         
-        open(self.log_file, 'a').close()
-        file_handler = logging.FileHandler(self.log_file)
+        open(self.logfile, 'a').close()
+        file_handler = logging.FileHandler(self.logfile)
         file_formatter = logging.Formatter(
             '%(asctime)s - %(levelname)s - %(name)s - %(function)s - %(filename)s:%(lineno)d - %(message)s'
         )

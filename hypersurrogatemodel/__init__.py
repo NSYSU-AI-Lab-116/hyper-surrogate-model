@@ -6,11 +6,7 @@ with LoRA fine-tuning support.
 """
 
 from .model import TrainableLLM
-from .dataset import DomainDatasetProcessor, PromptTemplate
-from .trainer import (
-    GenerationTrainer, 
-    TrainingMetrics
-)
+from .dataset import  PromptTemplate
 from .evaluator import ModelEvaluator
 from .utils import (
     set_random_seed,
@@ -53,13 +49,8 @@ __all__ = [
     # Model classes
     "TrainableLLM",
     
-    # Dataset processing
-    "DomainDatasetProcessor",
+    # Dataset handling
     "PromptTemplate", 
-    
-    # Training
-    "GenerationTrainer",
-    "TrainingMetrics",
     
     # Evaluation
     "ModelEvaluator",

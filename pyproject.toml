@@ -23,6 +23,7 @@ dependencies = [
     "seaborn>=0.13.2",
     "huggingface-hub>=0.34.4",
     "pyyaml>=6.0.2",
+    "nas-bench-201>=2.1",
 ]
 
 [project.optional-dependencies]
@@ -34,7 +35,6 @@ dev = [
 ]
 
 [project.scripts]
-# 全局可用的腳本（安裝後可直接使用）
 train_new = "cli:train_new"
 train = "cli:train_continue"
 eval = "cli:evaluate"

@@ -19,80 +19,80 @@ logger = Logger("Config")
 @dataclass
 class ModelConfig:
     """Model configuration settings."""
-    pretrained_model:Optional[str] | None = None 
-    transfer_model_path: Optional[str] | None = None
-    use_lora: bool | None = None
-    device: str | None = None
-    num_outputs: int | None = None
+    pretrained_model: str
+    transfer_model_path: str
+    use_lora: bool 
+    device: str 
+    num_outputs: int 
 
 
 @dataclass
 class GenerationConfig:
     """Generation configuration settings."""
-    max_new_tokens: int | None = None
-    temperature: float | None = None
-    do_sample: bool | None = None
-    top_k: int | None = None
-    top_p: float | None = None
-    repetition_penalty: float | None = None
-    length_penalty: float | None = None
-    num_beams: int | None = None
+    max_new_tokens: int 
+    temperature: float 
+    do_sample: bool 
+    top_k: int 
+    top_p: float 
+    repetition_penalty: float 
+    length_penalty: float 
+    num_beams: int 
 
 
 @dataclass
 class TrainingConfig:
     """Training configuration settings."""
-    batch_size: int | None = None
-    learning_rate: float | None = None
-    num_epochs: int | None = None
-    warmup_steps: int | None = None
-    weight_decay: float | None = None
-    fp16: bool | None = None
-    gradient_accumulation_steps: int| None = None
+    train_type: str   # Options: from_pretrained / from_saved
+    batch_size: int 
+    learning_rate: float 
+    num_epochs: int 
+    warmup_steps: int 
+    weight_decay: float 
+    fp16: bool 
+    gradient_accumulation_steps: int
 
 
 @dataclass
 class LoRAConfig:
     """LoRA configuration settings."""
-    r: int| None = None
-    lora_alpha: int | None = None
-    lora_dropout: float | None = None
-    target_modules: list | None = None
+    r: int
+    lora_alpha: int 
+    lora_dropout: float 
+    target_modules: list 
 
 
 @dataclass
 class DatasetConfig:
     """Dataset configuration settings."""
-    max_length: int | None = None
-    padding: str | None = None
-    truncation: bool | None = None
-    template_type: str | None = None
-    dataset_partition: int | None = None
-    train_data_path: str| None = None 
-    test_data_path: Optional[str] | None = None
-    preprocess_train_path: Optional[str] | None = None
-    preprocess_test_path: Optional[str] | None = None
-    preprocess_source_path: Optional[str] | None = None
+    max_length: int 
+    padding: str 
+    truncation: bool 
+    template_type: str 
+    dataset_partition: int 
+    train_data_path: str 
+    test_data_path: str 
+    preprocess_train_path: str 
+    preprocess_test_path: str
+    preprocess_source_path: str
 
 
 @dataclass
 class ComparisonConfig:
     """Comparison and tuning configuration settings."""
-    method: str | None = None
-    batch_size: int| None = None
-    similarity_threshold: float | None = None
-    tuning_strategy: str | None = None
+    method: str 
+    batch_size: int
+    similarity_threshold: float 
+    tuning_strategy: str 
 
 
 @dataclass
 class HyperConfig:
     """Path configuration settings."""
-    save_basepath: str| None = None 
-    addition_name: Optional[str] | None = None
-    index_path: Optional[str] | None = None
-    fs: list[dict[str,Any]] | None = None
+    save_basepath: str 
+    addition_name: str
+    index_path: Optional[str]  = None
+    fs: list[dict[str,Any]] | None  = None
     new_version_dir: str | None = None
-    run_mode: str | None = None  # Options: data_process / new_train / trans_train / eval 
     
 
     def __post_init__(self):
@@ -126,13 +126,14 @@ class ConfigManager:
     Loads configuration from YAML file with fallback to default values.
     """
     
-    def __init__(self, config_path: Optional[Union[str, Path]] = None):
+    def __init__(self, run_mode, config_path: Optional[Union[str, Path]] = None):
         """
         Initialize configuration manager.
         
         Args:
             config_path: Path to YAML configuration file (default: config.yaml)
         """
+        self.run_mode = run_mode
         if config_path:
             self.config_path = Path(config_path)
         else:
@@ -150,14 +151,14 @@ class ConfigManager:
         self.comparison = self._create_comparison_config()
         self.hyper = self._create_hyper_config()
         
-        if self.hyper.run_mode == "data_process":
+        if self.run_mode == "data":
             self._check_config_exist(
                 self.dataset.preprocess_source_path,
                 self.dataset.preprocess_train_path,
                 self.dataset.preprocess_test_path,
                 self.dataset.dataset_partition
             )
-        elif self.hyper.run_mode == "new_train":
+        elif self.run_mode == "train" and self.training.train_type == "from_pretrained":
             self._check_config_exist(
                 self.model.pretrained_model,
                 self.model.use_lora,         # model
@@ -175,7 +176,7 @@ class ConfigManager:
                 self.lora.target_modules,    # model
             )
             
-        elif self.hyper.run_mode == "trans_train":
+        elif self.run_mode == "train" and self.training.train_type == "from_saved":
             self._check_config_exist(
                 self.model.transfer_model_path,
                 self.model.use_lora,         # model
@@ -193,7 +194,7 @@ class ConfigManager:
                 self.lora.target_modules,    # model
                 
             )
-        elif self.hyper.run_mode == "eval":
+        elif self.run_mode == "eval":
             self._check_config_exist(
                 self.model.transfer_model_path,
                 self.dataset.test_data_path
@@ -262,6 +263,7 @@ class ConfigManager:
     def _create_training_config(self) -> TrainingConfig:
         """Create training configuration."""
         return TrainingConfig(
+            train_type=self._get_config_value("training", "train_type", "from_pretrained", str),
             batch_size=self._get_config_value("training", "batch_size", 8, int),
             learning_rate=self._get_config_value("training", "learning_rate", 2e-5, float),
             num_epochs=self._get_config_value("training", "num_epochs", 3, int),
@@ -309,8 +311,7 @@ class ConfigManager:
         """Create path configuration."""
         return HyperConfig(
             save_basepath=self._get_config_value("paths", "save_basepath", "./saved_model", str),
-            addition_name=self._get_config_value("paths", "addition_name", None),
-            run_mode=self._get_config_value("paths", "run_mode", "train", str)
+            addition_name=self._get_config_value("paths", "addition_name", None)
         )
        
     def _check_config_exist(self, *args):
@@ -476,6 +477,7 @@ class ConfigManager:
                 "num_beams": self.generation.num_beams,
             },
             "training": {
+                "train_type": self.training.train_type,
                 "batch_size": self.training.batch_size,
                 "learning_rate": self.training.learning_rate,
                 "num_epochs": self.training.num_epochs,
@@ -513,7 +515,6 @@ class ConfigManager:
                 "addition_name": self.hyper.addition_name,
                 "index_path": self.hyper.index_path,
                 "fs": self.hyper.fs,
-                "run_mode": self.hyper.run_mode
             },
         }
     
@@ -535,4 +536,4 @@ class ConfigManager:
 
 
 # Global configuration instance
-config = ConfigManager()
+config = ConfigManager(run_mode="train")

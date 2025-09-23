@@ -45,6 +45,7 @@ path:
 run_mode:
   mode: trans_train
 training:
+  train_type: from_pretrained
   batch_size: 16
   learning_rate: 2e-5
   num_epochs: 12

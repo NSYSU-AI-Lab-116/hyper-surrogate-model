@@ -1,24 +1,18 @@
-<<<<<<< HEAD
-# Byte-compiled / optimized / DLL files
-=======
 # model file 
 saved_model/
 logs/
 
 
 # Python-generated files
->>>>>>> a9f4ee504bc42b89c829d862b965a053a5860813
 __pycache__/
 *.py[cod]
 *$py.class
 experiments/
-<<<<<<< HEAD
 
 # manual
 *.log
 wandb/
 .DS_Store
-<<<<<<< HEAD
 =======
 # C extensions
 *.so
@@ -228,8 +222,6 @@ experiments/
 
 test.py
 data/raw/NAS-Bench-201-v1_1-096897.pth
->>>>>>> 7f3a0c498788c470492c5fed212f6bdd6b0a152a
-=======
 
 # vscode
 .vscode/

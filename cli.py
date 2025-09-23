@@ -4,18 +4,18 @@ Command Line Interface for Hyper Surrogate Model
 import sys
 import subprocess
 from pathlib import Path
-from hypersurrogatemodel.config import config
 from hypersurrogatemodel import Logger
 logger = Logger("CLI")
 
+
 def train_new():
     """Start new training"""
-    script_path = Path(__file__).parent / "entries" / "training_init.py"
+    script_path = Path(__file__).parent / "entries_accuracy" / "training_init.py"
     subprocess.run([sys.executable, str(script_path)])
 
 def train_continue():
     """Continue training from saved model"""
-    script_path = Path(__file__).parent / "entries" / "training_transfer.py"
+    script_path = Path(__file__).parent / "entries_accuracy" / "training_transfer.py"
     subprocess.run([sys.executable, str(script_path)])
 
 def evaluate():
@@ -25,5 +25,5 @@ def evaluate():
 
 def data_process():
     """Process training data"""
-    script_path = Path(__file__).parent/ "entries" / "data_reconstruct.py"
+    script_path = Path(__file__).parent/ "entries_accuracy" / "data_reconstruct.py"
     subprocess.run([sys.executable, str(script_path)])

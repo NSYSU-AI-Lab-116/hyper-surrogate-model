@@ -64,6 +64,7 @@ class Logger:
         """
         self.use_colors = use_colors
         self.function = "main"
+        os.makedirs("log", exist_ok=True)
         self.logfile = "log/.log"
         self.logger = logging.getLogger(name)
         self.logger.setLevel(getattr(logging, level.upper()))

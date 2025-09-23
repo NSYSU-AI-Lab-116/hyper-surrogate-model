@@ -22,7 +22,7 @@ def train_with_dataset(dataset_path, model_path="./saved_model", epochs=6, batch
         full_data = json.load(f)
         
     logger.info("Performing train-test split (80/20)...")
-    train_data, test_data = train_test_split(full_data, test_size=0.2, random_state=42)
+    train_data, test_data = train_test_split(full_data, test_size=0.2, random_state=20)
     test_data_path = "./data/processed/NAS_bench_201/cifar10_test_set.json"
     with open(test_data_path, 'w') as f:
         json.dump(test_data, f, indent=2)
@@ -99,27 +99,44 @@ def train_with_dataset(dataset_path, model_path="./saved_model", epochs=6, batch
             if current_batch_size <= 0: continue
 
             for _ in range(current_batch_size):
-                mid_point = len(train_data) // 2
-                if mid_point < 2: # At least two samples required
-                    good_sample = random.choice(train_data[:mid_point])
-                    bad_sample = random.choice(train_data[mid_point:])
+                # 四分位數
+                q1 = len(train_data) // 4
+                q2 = len(train_data) // 2
+                q3 = q1 * 3
                 
+                # valid interval
+                if q1 < 2 or (len(train_data) - q3) < 2:
+                    good_sample = random.choice(train_data[:q2])
+                    bad_sample = random.choice(train_data[q2:])
+                    good_prompts.append(good_sample['text'])
+                    bad_prompts.append(bad_sample['text'])
+                    continue
+
+                rand_val = random.random()
+
                 # hard pairwise
-                elif random.random() < 0.6: # adjustable
-                    # 
-                    idx1 = random.randint(0, mid_point - 2)
-                    idx2 = random.randint(idx1 + 1, mid_point - 1)
-                    
+                if rand_val < 0.4: 
+                    idx1 = random.randint(0, q1 - 2)
+                    idx2 = random.randint(idx1 + 1, q1 - 1)
                     good_sample = train_data[idx1]
                     bad_sample = train_data[idx2]
-                    
+                
+                # hard pairwise for weak arch.
+                elif rand_val < 0.7: 
+                    idx1 = random.randint(q3, len(train_data) - 2)
+                    idx2 = random.randint(idx1 + 1, len(train_data) - 1)
+                    good_sample = train_data[idx1] 
+                    bad_sample = train_data[idx2]
+
                 # simple pairwise
-                else:
-                    good_sample = random.choice(train_data[:mid_point])
-                    bad_sample = random.choice(train_data[mid_point:])
+                else: 
+                    good_sample = random.choice(train_data[:q2])
+                    bad_sample = random.choice(train_data[q2:])
 
                 good_prompts.append(good_sample['text'])
                 bad_prompts.append(bad_sample['text'])
+                
+                
 
             if not good_prompts: continue
 

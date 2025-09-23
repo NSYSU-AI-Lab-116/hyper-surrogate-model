@@ -1,0 +1,54 @@
+comparison:
+  batch_size: 8
+  method: similarity
+  similarity_threshold: 0.8
+  tuning_strategy: error_focused
+dataset:
+  dataset_partition: -1
+  dataset_path: data/processed/NAS_bench_201_train/cifar10_cleaned.json
+  max_length: 512
+  padding: max_length
+  preprocess_source_path: ./data/processed/master_dataset.parquet
+  preprocess_test_path: ./data/processed/NAS_bench_201_test
+  preprocess_train_path: ./data/processed/NAS_bench_201_train
+  template_type: generation
+  truncation: true
+generation:
+  do_sample: true
+  length_penalty: 1.0
+  max_new_tokens: 256
+  num_beams: 1
+  repetition_penalty: 1.1
+  temperature: 0.7
+  top_k: 64
+  top_p: 0.95
+hyper: {}
+lora:
+  lora_alpha: 32
+  lora_dropout: 0.1
+  r: 16
+  target_modules:
+  - q_proj
+  - v_proj
+  - k_proj
+  - o_proj
+model:
+  device: auto
+  num_outputs: 1
+  pretrained_model: google/gemma-3-270m-it
+  trainsource: local
+  transfer_model_path: saved_model/v1
+  use_lora: true
+path:
+  addition_name: null
+  run_mode: data_process
+  save_basepath: saved_model
+run_mode:
+  mode: trans_train
+training:
+  batch_size: 16
+  learning_rate: 1e-5
+  num_epochs: 12
+  radient_accumulation_steps: 1
+  warmup_steps: 100
+  weight_decay: 0.01

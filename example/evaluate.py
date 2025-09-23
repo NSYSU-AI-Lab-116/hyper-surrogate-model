@@ -2,9 +2,9 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 import torch
 import torch.nn as nn
 import json 
+import tqdm
 from hypersurrogatemodel import Logger
-from tqdm import tqdm
-import os
+from hypersurrogatemodel.config import config 
 import re
 from pathlib import Path
 logger = Logger("QUickInterface")

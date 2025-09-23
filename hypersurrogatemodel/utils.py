@@ -8,13 +8,10 @@ import torch
 import torch.nn as nn
 import numpy as np
 import random
-import json
-import yaml
 import logging
+import os 
 from typing import Dict, Any, List, Optional, Union
 from pathlib import Path
-import os
-from datetime import datetime
 
 class ColoredFormatter(logging.Formatter):
     """
@@ -53,9 +50,8 @@ class Logger:
     def __init__(
         self, 
         name: str = "enhanced_llm", 
-        log_dir: str = "./logs",
         level: str = "INFO",
-        use_colors: bool = True
+        use_colors: bool = True,
     ):
         """
         Initialize logger.
@@ -66,11 +62,9 @@ class Logger:
             level: Logging level
             use_colors: Enable colored console output
         """
-        self.log_dir = Path(log_dir)
-        self.log_dir.mkdir(parents=True, exist_ok=True)
         self.use_colors = use_colors
         self.function = "main"
-        
+        self.logfile = "log/.log"
         self.logger = logging.getLogger(name)
         self.logger.setLevel(getattr(logging, level.upper()))
         
@@ -85,8 +79,8 @@ class Logger:
         console_handler.setFormatter(console_formatter)
         self.logger.addHandler(console_handler)
         
-        log_file = self.log_dir / f"{name}_{datetime.now().strftime('%Y%m%d')}.log"
-        file_handler = logging.FileHandler(log_file)
+        open(self.logfile, 'a').close()
+        file_handler = logging.FileHandler(self.logfile)
         file_formatter = logging.Formatter(
             '%(asctime)s - %(levelname)s - %(name)s - %(function)s - %(filename)s:%(lineno)d - %(message)s'
         )
@@ -209,177 +203,3 @@ def get_system_info() -> Dict[str, Any]:
         info["cuda_memory_reserved_gb"] = torch.cuda.memory_reserved() / (1024**3)
     
     return info
-
-
-def save_config(config: Dict[str, Any], save_path: Union[str, Path]) -> None:
-    """
-    Save configuration to file.
-    
-    Args:
-        config: Configuration dictionary
-        save_path: Path to save the configuration
-    """
-    save_path = Path(save_path)
-    save_path.parent.mkdir(parents=True, exist_ok=True)
-    
-    if save_path.suffix.lower() == '.yaml':
-        with open(save_path, 'w') as f:
-            yaml.dump(config, f, default_flow_style=False, indent=2)
-    else:
-        with open(save_path, 'w') as f:
-            json.dump(config, f, indent=2, default=str)
-    
-    logger.info(f"Configuration saved to {save_path}")
-
-
-def load_config(config_path: Union[str, Path]) -> Dict[str, Any]:
-    """
-    Load configuration from file.
-    
-    Args:
-        config_path: Path to the configuration file
-        
-    Returns:
-        Configuration dictionary
-    """
-    config_path = Path(config_path)
-    
-    if not config_path.exists():
-        raise FileNotFoundError(f"Configuration file not found: {config_path}")
-    
-    if config_path.suffix.lower() == '.yaml':
-        with open(config_path, 'r') as f:
-            config = yaml.safe_load(f)
-    else:
-        with open(config_path, 'r') as f:
-            config = json.load(f)
-    
-    logger.info(f"Configuration loaded from {config_path}")
-    return config
-
-
-def create_experiment_directory(
-    base_dir: str = "./experiments",
-    experiment_name: Optional[str] = None,
-    timestamp: bool = True,
-) -> Path:
-    """
-    Create a directory for experiment outputs.
-    
-    Args:
-        base_dir: Base directory for experiments
-        experiment_name: Name of the experiment
-        timestamp: Whether to include timestamp in directory name
-        
-    Returns:
-        Path to the created experiment directory
-    """
-    base_path = Path(base_dir)
-    base_path.mkdir(parents=True, exist_ok=True)
-    
-    if experiment_name is None:
-        experiment_name = "experiment"
-    
-    if timestamp:
-        timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-        dir_name = f"{experiment_name}_{timestamp_str}"
-    else:
-        dir_name = experiment_name
-    
-    experiment_dir = base_path / dir_name
-    experiment_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Create subdirectories
-    (experiment_dir / "models").mkdir(exist_ok=True)
-    (experiment_dir / "logs").mkdir(exist_ok=True)
-    (experiment_dir / "results").mkdir(exist_ok=True)
-    (experiment_dir / "configs").mkdir(exist_ok=True)
-    
-    logger.info(f"Experiment directory created: {experiment_dir}")
-    return experiment_dir
-
-
-def ensure_directory(path: Union[str, Path]) -> Path:
-    """
-    Ensure a directory exists, create if it doesn't.
-    
-    Args:
-        path: Directory path
-        
-    Returns:
-        Path object
-    """
-    path = Path(path)
-    path.mkdir(parents=True, exist_ok=True)
-    return path
-
-
-class ConfigManager:
-    """
-    Configuration manager for handling multiple configuration files.
-    """
-    
-    def __init__(self, config_dir: str = "./configs"):
-        """
-        Initialize configuration manager.
-        
-        Args:
-            config_dir: Directory containing configuration files
-        """
-        self.config_dir = Path(config_dir)
-        self.config_dir.mkdir(parents=True, exist_ok=True)
-        self.configs = {}
-    
-    def load_all_configs(self) -> Dict[str, Dict[str, Any]]:
-        """
-        Load all configuration files from the config directory.
-        
-        Returns:
-            Dictionary of loaded configurations
-        """
-        config_files = list(self.config_dir.glob("*.json")) + list(self.config_dir.glob("*.yaml"))
-        
-        for config_file in config_files:
-            config_name = config_file.stem
-            self.configs[config_name] = load_config(config_file)
-        
-        logger.info(f"Loaded {len(self.configs)} configuration files")
-        return self.configs
-    
-    def get_config(self, name: str) -> Dict[str, Any]:
-        """
-        Get a specific configuration.
-        
-        Args:
-            name: Configuration name
-            
-        Returns:
-            Configuration dictionary
-        """
-        if name not in self.configs:
-            config_path = self.config_dir / f"{name}.json"
-            if not config_path.exists():
-                config_path = self.config_dir / f"{name}.yaml"
-            
-            if config_path.exists():
-                self.configs[name] = load_config(config_path)
-            else:
-                raise ValueError(f"Configuration '{name}' not found")
-        
-        return self.configs[name]
-    
-    def save_config(self, name: str, config: Dict[str, Any], format: str = "json") -> None:
-        """
-        Save a configuration.
-        
-        Args:
-            name: Configuration name
-            config: Configuration dictionary
-            format: Save format ("json" or "yaml")
-        """
-        save_path = self.config_dir / f"{name}.{format}"
-        save_config(config, save_path)
-        self.configs[name] = config
-
-
-

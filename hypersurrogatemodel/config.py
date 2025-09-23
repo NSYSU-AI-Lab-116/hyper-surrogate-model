@@ -7,87 +7,122 @@ that supports YAML files, environment variables, and default values.
 
 import os
 import yaml
+import json
+import inspect
 from typing import Dict, Any, Optional, Union
+from typing import get_type_hints, get_origin, get_args
 from pathlib import Path
-from dataclasses import dataclass, field
-
+from dataclasses import dataclass
+from .utils import Logger
+logger = Logger("Config")
 
 @dataclass
 class ModelConfig:
     """Model configuration settings."""
-    pretrained_model: str = "google/gemma-3-270m-it"
-    use_lora: bool = True
-    device: str = "auto"
-    num_outputs: int = 1
-    
+    pretrained_model:Optional[str] | None = None 
+    transfer_model_path: Optional[str] | None = None
+    use_lora: bool | None = None
+    device: str | None = None
+    num_outputs: int | None = None
 
 
 @dataclass
 class GenerationConfig:
     """Generation configuration settings."""
-    max_new_tokens: int = 50
-    temperature: float = 0.7
-    do_sample: bool = True
-    top_k: int = 64
-    top_p: float = 0.95
-    repetition_penalty: float = 1.1
-    length_penalty: float = 1.0
-    num_beams: int = 1
+    max_new_tokens: int | None = None
+    temperature: float | None = None
+    do_sample: bool | None = None
+    top_k: int | None = None
+    top_p: float | None = None
+    repetition_penalty: float | None = None
+    length_penalty: float | None = None
+    num_beams: int | None = None
 
 
 @dataclass
 class TrainingConfig:
     """Training configuration settings."""
-    batch_size: int = 8
-    learning_rate: float = 2e-5
-    num_epochs: int = 3
-    warmup_steps: int = 100
-    weight_decay: float = 0.01
-    fp16: bool = False
-    gradient_accumulation_steps: int = 1
+    batch_size: int | None = None
+    learning_rate: float | None = None
+    num_epochs: int | None = None
+    warmup_steps: int | None = None
+    weight_decay: float | None = None
+    fp16: bool | None = None
+    gradient_accumulation_steps: int| None = None
 
 
 @dataclass
 class LoRAConfig:
     """LoRA configuration settings."""
-    r: int = 16
-    lora_alpha: int = 32
-    lora_dropout: float = 0.1
-    target_modules: list = field(default_factory=lambda: ["q_proj", "v_proj", "k_proj", "o_proj"])
-
-
-@dataclass
-class LoggingConfig:
-    """Logging configuration settings."""
-    level: str = "INFO"
-    use_wandb: bool = False
-    wandb_project: str = "hypersurrogatemodel"
-    save_files: bool = True
-    output_dir: str = "./results"
+    r: int| None = None
+    lora_alpha: int | None = None
+    lora_dropout: float | None = None
+    target_modules: list | None = None
 
 
 @dataclass
 class DatasetConfig:
     """Dataset configuration settings."""
-    max_length: int = 512
-    padding: str = "max_length"
-    truncation: bool = True
-    template_type: str = "generation"
+    max_length: int | None = None
+    padding: str | None = None
+    truncation: bool | None = None
+    template_type: str | None = None
+    dataset_partition: int | None = None
+    train_data_path: str| None = None 
+    test_data_path: Optional[str] | None = None
+    preprocess_train_path: Optional[str] | None = None
+    preprocess_test_path: Optional[str] | None = None
+    preprocess_source_path: Optional[str] | None = None
 
 
 @dataclass
 class ComparisonConfig:
     """Comparison and tuning configuration settings."""
-    method: str = "similarity"
-    batch_size: int = 256
-    similarity_threshold: float = 0.8
-    tuning_strategy: str = "error_focused"
+    method: str | None = None
+    batch_size: int| None = None
+    similarity_threshold: float | None = None
+    tuning_strategy: str | None = None
+
+
+@dataclass
+class HyperConfig:
+    """Path configuration settings."""
+    save_basepath: str| None = None 
+    addition_name: Optional[str] | None = None
+    index_path: Optional[str] | None = None
+    fs: list[dict[str,Any]] | None = None
+    new_version_dir: str | None = None
+    run_mode: str | None = None  # Options: data_process / new_train / trans_train / eval 
+    
+
+    def __post_init__(self):
+        if self.save_basepath is None:
+            raise ValueError("save_basepath cannot be None")
+        self.index_path = os.path.join(self.save_basepath, "index.json")
+        
+        os.makedirs(self.save_basepath, exist_ok=True) 
+        self.index_path = os.path.join(self.save_basepath, "index.json")
+        try:
+            with open(self.index_path, "r") as f:
+                content = f.read().strip()
+                if content:
+                    self.fs = json.loads(content)
+                else:
+                    self.fs = []
+        except (json.JSONDecodeError, FileNotFoundError):
+            self.fs = []
+        
+        self.fs_len = len(self.fs if self.fs is not None else [])
+        if self.addition_name is not None:
+            self.new_version_dir = f"v{self.fs_len}_{self.addition_name}"
+        else:
+            self.new_version_dir = f"v{self.fs_len+1}"
+        self.save_basepath = os.path.join(self.save_basepath, self.new_version_dir)
 
 
 class ConfigManager:
     """
     Simple YAML configuration manager.
-    
     Loads configuration from YAML file with fallback to default values.
     """
     
@@ -111,9 +146,58 @@ class ConfigManager:
         self.generation = self._create_generation_config()
         self.training = self._create_training_config()
         self.lora = self._create_lora_config()
-        self.logging = self._create_logging_config()
         self.dataset = self._create_dataset_config()
         self.comparison = self._create_comparison_config()
+        self.hyper = self._create_hyper_config()
+        
+        if self.hyper.run_mode == "data_process":
+            self._check_config_exist(
+                self.dataset.preprocess_source_path,
+                self.dataset.preprocess_train_path,
+                self.dataset.preprocess_test_path,
+                self.dataset.dataset_partition
+            )
+        elif self.hyper.run_mode == "new_train":
+            self._check_config_exist(
+                self.model.pretrained_model,
+                self.model.use_lora,         # model
+                self.training.batch_size,
+                self.training.learning_rate,
+                self.training.num_epochs,
+                self.dataset.train_data_path,
+                self.hyper.save_basepath,    # model
+                self.hyper.addition_name,    # model
+                self.hyper.fs,               # model
+                self.hyper.new_version_dir,  # model
+                self.lora.r,                 # model
+                self.lora.lora_alpha,        # model
+                self.lora.lora_dropout,      # model
+                self.lora.target_modules,    # model
+            )
+            
+        elif self.hyper.run_mode == "trans_train":
+            self._check_config_exist(
+                self.model.transfer_model_path,
+                self.model.use_lora,         # model
+                self.training.batch_size,
+                self.training.learning_rate,
+                self.training.num_epochs,
+                self.dataset.train_data_path,
+                self.hyper.save_basepath,    # model
+                self.hyper.addition_name,    # model
+                self.hyper.fs,               # model
+                self.hyper.new_version_dir,  # model
+                self.lora.r,                 # model
+                self.lora.lora_alpha,        # model
+                self.lora.lora_dropout,      # model
+                self.lora.target_modules,    # model
+                
+            )
+        elif self.hyper.run_mode == "eval":
+            self._check_config_exist(
+                self.model.transfer_model_path,
+                self.dataset.test_data_path
+            )
     
     def _load_config(self):
         """Load configuration from YAML file."""
@@ -156,6 +240,7 @@ class ConfigManager:
         """Create model configuration."""
         return ModelConfig(
             pretrained_model=self._get_config_value("model", "pretrained_model", "google/gemma-2-2b-it"),
+            transfer_model_path=self._get_config_value("model", "transfer_model_path", None),
             use_lora=self._get_config_value("model", "use_lora", True, bool),
             device=self._get_config_value("model", "device", "auto"),
             num_outputs=self._get_config_value("model", "num_outputs", 1, int),
@@ -183,7 +268,7 @@ class ConfigManager:
             warmup_steps=self._get_config_value("training", "warmup_steps", 100, int),
             weight_decay=self._get_config_value("training", "weight_decay", 0.01, float),
             fp16=self._get_config_value("training", "fp16", False, bool),
-            gradient_accumulation_steps=self._get_config_value("training", "gradient_accumulation_steps", 1, int),
+            gradient_accumulation_steps=self._get_config_value("training", "gradient_accumulation_steps", 1, int)
         )
 
     def _create_lora_config(self) -> LoRAConfig:
@@ -196,16 +281,6 @@ class ConfigManager:
             target_modules=self._get_config_value("lora", "target_modules", default_target_modules, list),
         )
     
-    def _create_logging_config(self) -> LoggingConfig:
-        """Create logging configuration."""
-        return LoggingConfig(
-            level=self._get_config_value("logging", "level", "INFO"),
-            use_wandb=self._get_config_value("logging", "use_wandb", False, bool),
-            wandb_project=self._get_config_value("logging", "wandb_project", "hypersurrogatemodel"),
-            save_files=self._get_config_value("logging", "save_files", True, bool),
-            output_dir=self._get_config_value("logging", "output_dir", "./results"),
-        )
-    
     def _create_dataset_config(self) -> DatasetConfig:
         """Create dataset configuration."""
         return DatasetConfig(
@@ -213,6 +288,12 @@ class ConfigManager:
             padding=self._get_config_value("dataset", "padding", True, bool),
             truncation=self._get_config_value("dataset", "truncation", True, bool),
             template_type=self._get_config_value("dataset", "template_type", "structured"),
+            dataset_partition=self._get_config_value("dataset", "dataset_partition", -1, int),
+            train_data_path=self._get_config_value("dataset", "train_data_path", None, str),
+            test_data_path=self._get_config_value("dataset", "test_data_path", None, str),
+            preprocess_train_path=self._get_config_value("dataset", "preprocess_train_path", None, str),
+            preprocess_test_path=self._get_config_value("dataset", "preprocess_test_path", None, str),
+            preprocess_source_path=self._get_config_value("dataset", "preprocess_source_path", None, str)
         )
     
     def _create_comparison_config(self) -> ComparisonConfig:
@@ -224,11 +305,162 @@ class ConfigManager:
             tuning_strategy=self._get_config_value("comparison", "tuning_strategy", "error_focused"),
         )
     
+    def _create_hyper_config(self) -> HyperConfig:
+        """Create path configuration."""
+        return HyperConfig(
+            save_basepath=self._get_config_value("paths", "save_basepath", "./saved_model", str),
+            addition_name=self._get_config_value("paths", "addition_name", None),
+            run_mode=self._get_config_value("paths", "run_mode", "train", str)
+        )
+       
+    def _check_config_exist(self, *args):
+        """
+        check var is exist and in valid type
+        """
+        quitting = False
+        
+        frame = inspect.currentframe().f_back # type: ignore
+        
+        for i, arg_value in enumerate(args):
+            var_path = self._trace_variable_path(frame, i)
+            expected_type = self._get_expected_type(var_path)
+            if not self._is_valid_type(arg_value, expected_type):
+                actual_type = type(arg_value).__name__
+                logger.error(f"Configuration error: Invalid type for {var_path}. Expected: {expected_type}, Got: {actual_type} ({arg_value})")
+                quitting = True
+        
+        if quitting:
+            raise ValueError("Configuration values have invalid types")
+
+    def _get_expected_type(self, var_path: str):
+        """
+        'model.pretrained_model' -> str|None
+        """
+        try:
+            parts = var_path.split('.')
+            if len(parts) >= 2:
+                section = parts[0]  # model, training, dataset, etc.
+                field_name = parts[1]  # pretrained_model, batch_size, etc.
+                
+                config_class = None
+                if section == 'model':
+                    config_class = ModelConfig
+                elif section == 'training':
+                    config_class = TrainingConfig
+                elif section == 'dataset':
+                    config_class = DatasetConfig
+                elif section == 'lora':
+                    config_class = LoRAConfig
+                elif section == 'hyper':
+                    config_class = HyperConfig
+                elif section == 'generation':
+                    config_class = GenerationConfig
+                elif section == 'comparison':
+                    config_class = ComparisonConfig
+                
+                if config_class:
+                    type_hints = get_type_hints(config_class)
+                    return type_hints.get(field_name, "Any")
+            
+            return "Any"
+        except Exception:
+            return "Any"
+
+    def _is_valid_type(self, value, expected_type) -> bool:
+        if expected_type == "Any":
+            return True
+        
+        if value is None:
+            if hasattr(expected_type, '__origin__'):
+                if get_origin(expected_type) is Union:
+                    return type(None) in get_args(expected_type)
+            return 'None' in str(expected_type) or 'Optional' in str(expected_type)
+        
+        if hasattr(expected_type, '__origin__'):
+            if get_origin(expected_type) is Union:
+                valid_types = [t for t in get_args(expected_type) if t is not type(None)]
+                return any(isinstance(value, t) for t in valid_types)
+        
+        return isinstance(value, expected_type)
+    def _trace_variable_path(self, frame, arg_index: int) -> str:
+        try:
+            filename = frame.f_code.co_filename
+            line_number = frame.f_lineno
+            
+            with open(filename, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+            
+            call_lines = []
+            start_line = line_number - 1
+            
+            for i in range(start_line, max(0, start_line - 5), -1):
+                if 'check_config_exist' in lines[i]:
+                    start_line = i
+                    break
+            
+            paren_count = 0
+            for i in range(start_line, min(len(lines), start_line + 20)):
+                line = lines[i].strip()
+                call_lines.append(line)
+
+                paren_count += line.count('(') - line.count(')')
+                
+                if paren_count == 0 and 'check_config_exist' in ''.join(call_lines):
+                    break
+            
+            call_text = ' '.join(call_lines)
+
+            import re
+            match = re.search(r'check_config_exist\s*\(\s*(.*?)\s*\)', call_text, re.DOTALL)
+            if match:
+                args_str = match.group(1)
+                args_list = self._split_arguments(args_str)
+                
+                if arg_index < len(args_list):
+                    arg_expr = args_list[arg_index].strip()
+                    if arg_expr.startswith('self.'):
+                        return arg_expr[5:] 
+                    return arg_expr
+            
+            return f"argument_{arg_index}"
+            
+        except Exception as e:
+            return f"argument_{arg_index}"
+
+    def _split_arguments(self, args_str: str) -> list:
+
+        args = []
+        current_arg = ""
+        paren_depth = 0
+        bracket_depth = 0
+        
+        for char in args_str:
+            if char in '([':
+                paren_depth += 1 if char == '(' else 0
+                bracket_depth += 1 if char == '[' else 0
+                current_arg += char
+            elif char in ')]':
+                paren_depth -= 1 if char == ')' else 0
+                bracket_depth -= 1 if char == ']' else 0
+                current_arg += char
+            elif char == ',' and paren_depth == 0 and bracket_depth == 0:
+                if current_arg.strip():
+                    args.append(current_arg.strip())
+                current_arg = ""
+            else:
+                current_arg += char
+        if current_arg.strip():
+            args.append(current_arg.strip())
+        
+        return args
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert configuration to dictionary."""
+
         return {
             "model": {
                 "pretrained_model": self.model.pretrained_model,
+                "transfer_model_path": self.model.transfer_model_path,
                 "use_lora": self.model.use_lora,
                 "device": self.model.device,
                 "num_outputs": self.model.num_outputs,
@@ -258,25 +490,31 @@ class ConfigManager:
                 "lora_dropout": self.lora.lora_dropout,
                 "target_modules": self.lora.target_modules,
             },
-            "logging": {
-                "level": self.logging.level,
-                "use_wandb": self.logging.use_wandb,
-                "wandb_project": self.logging.wandb_project,
-                "save_files": self.logging.save_files,
-                "output_dir": self.logging.output_dir,
+            "dataset": {
+                "max_length": self.dataset.max_length,
+                "padding": self.dataset.padding,
+                "truncation": self.dataset.truncation,
+                "template_type": self.dataset.template_type,
+                "dataset_partition": self.dataset.dataset_partition,
+                "train_data_path":self.dataset.train_data_path,
+                "test_data_path": self.dataset.test_data_path,
+                "preprocess_train_path": self.dataset.preprocess_train_path,
+                "preprocess_test_path": self.dataset.preprocess_test_path,
+                "preprocess_srouce_path": self.dataset.preprocess_source_path,
             },
-            # "dataset": {
-            #     "max_length": self.dataset.max_length,
-            #     "padding": self.dataset.padding,
-            #     "truncation": self.dataset.truncation,
-            #     "template_type": self.dataset.template_type,
-            # },
-            # "comparison": {
-            #     "method": self.comparison.method,
-            #     "batch_size": self.comparison.batch_size,
-            #     "similarity_threshold": self.comparison.similarity_threshold,
-            #     "tuning_strategy": self.comparison.tuning_strategy,
-            # },
+            "comparison": {
+                "method": self.comparison.method,
+                "batch_size": self.comparison.batch_size,
+                "similarity_threshold": self.comparison.similarity_threshold,
+                "tuning_strategy": self.comparison.tuning_strategy,
+            },
+            "hyper": {
+                "save_basepath": self.hyper.save_basepath,
+                "addition_name": self.hyper.addition_name,
+                "index_path": self.hyper.index_path,
+                "fs": self.hyper.fs,
+                "run_mode": self.hyper.run_mode
+            },
         }
     
     def save_config(self, path: Optional[Union[str, Path]] = None):

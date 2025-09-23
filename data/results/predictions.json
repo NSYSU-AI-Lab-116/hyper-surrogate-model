@@ -1,6 +1,5 @@
 [
   {
-    "text": "{'uid': 'nats-tss-2128-cifar10', 'unified_text_description': 'cell=((op:nor_conv_1x1, in:0), (op:skip_connect, in:0), (op:nor_conv_1x1, in:1), (op:avg_pool_3x3, in:0), (op:skip_connect, in:1), (op:none, in:2))'}",
     "true_answer": 97.686,
     "predicted_score": -0.08503502607345581
   },

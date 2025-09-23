@@ -12,6 +12,7 @@ from sklearn.metrics import (
     accuracy_score, precision_recall_fscore_support, confusion_matrix,
     classification_report
 )
+from hypersurrogatemodel.config import config
 import json
 from datetime import datetime
 
@@ -50,7 +51,6 @@ class ModelEvaluator:
     
     def evaluate_classification(
         self,
-        test_data: List[Dict[str, Any]],
         batch_size: int = 8,
         save_results: bool = True,
         output_dir: Union[str, Path] = "./evaluation_results",
@@ -69,6 +69,12 @@ class ModelEvaluator:
         """
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
+        
+        if (config.dataset.test_data_path is None) or (not Path(config.dataset.test_data_path).is_file()):
+            logger.error("Test data path is not specified or the file does not exist.")
+            raise FileNotFoundError("Test data file not found.")
+        with open(config.dataset.test_data_path, 'r') as f:
+            test_data = json.load(f)
         
         predictions = []
         true_labels = []

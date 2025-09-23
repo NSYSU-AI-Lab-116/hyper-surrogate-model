@@ -5,15 +5,29 @@ import json
 import tqdm
 from hypersurrogatemodel import Logger
 from hypersurrogatemodel.config import config 
-
+import re
+from pathlib import Path
 logger = Logger("QUickInterface")
 logger.setFunctionsName("eval")
 
-local_model_path = config.model.transfer_model_path 
-if not local_model_path:
-    raise ValueError("Please set 'transfer_model_path' in the config file.")
-tokenizer = AutoTokenizer.from_pretrained(local_model_path)
-model = AutoModelForCausalLM.from_pretrained(local_model_path)
+def find_latest_model_version(base_path: str) -> str | None:
+    """Finds the latest version directory in the saved model path."""
+    p = Path(base_path)
+    if not p.exists(): return None
+    version_dirs = [d for d in p.iterdir() if d.is_dir() and re.match(r'v\d+', d.name)]
+    if not version_dirs: return None
+    version_dirs.sort(key=lambda d: int(re.search(r'v(\d+)', d.name).group(1)), reverse=True)
+    return str(version_dirs[0])
+
+base_model_path = os.path.abspath("./saved_model")
+latest_model_path = find_latest_model_version(base_model_path)
+if not latest_model_path:
+    logger.error(f"No trained model found in {base_model_path}")
+    exit()
+
+logger.info(f"Loading latest model from: {latest_model_path}")
+tokenizer = AutoTokenizer.from_pretrained(latest_model_path)
+model = AutoModelForCausalLM.from_pretrained(latest_model_path)
 
 class ModelWithCustomHead(nn.Module):
     def __init__(self, base_model, custom_head_path):
@@ -38,42 +52,35 @@ class ModelWithCustomHead(nn.Module):
         
         numerical_output = self.numerical_head(last_hidden_state[:, -1, :]) 
         
-        return {
-            'logits': outputs.logits,
-            'numerical_output': numerical_output,
-            'hidden_states': outputs.hidden_states
-        }
+        return numerical_output
 
-if __name__ == "__main__":
-    logger.info("Evaluating model")
-    combined_model = ModelWithCustomHead(model, f"{local_model_path}/numerical_head.pt")
-    combined_model.eval()
-    combined_model.to("cuda" if torch.cuda.is_available() else "cpu")
-    datapath = config.dataset.test_data_path
-    if not datapath:
-        raise ValueError("Please set 'dataset_path' in the config file.")
-    with open(datapath, "r") as f:
-        data = json.load(f)
+combined_model = ModelWithCustomHead(model, f"{latest_model_path}/numerical_head.pt")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+combined_model.to(device)
+combined_model.eval()
 
-    results = []
-    logger.info(f"Evaluating {len(data)} items...")
+with open("./data/processed/NAS_bench_201/cifar10_test_set.json", "r") as f:
+    data = json.load(f)
+logger.info(f"read {len(data)} data, start predicting.")
 
-    progress_bar = tqdm.tqdm(data,desc=f"{"Overall":8}")
-    for item in data:
-        input_ids = tokenizer(item['text'], return_tensors="pt").input_ids
-        input_ids = input_ids.to("cuda" if torch.cuda.is_available() else "cpu")
-        with torch.no_grad():
-            prediction = combined_model(input_ids)
-            result = prediction['numerical_output'].cpu().numpy().tolist()
-            
-            results.append({
-                'input': item['text'],
-                'prediction': result
-            })
-        progress_bar.update(1)
-    progress_bar.close()
 
-    logger.info("Evaluation completed! Saving results...")
-    with open("./data/results/predictions.json", "w") as f:
-        json.dump(results, f, indent=2)
-    logger.info("Results saved to ./data/results/predictions.json")
+results = []
+for item in tqdm(data, desc="Generatingg scores"):
+    #print(f"Processing item: {item['text']}...")
+    input_ids = tokenizer(item['text'], return_tensors="pt").input_ids
+    input_ids = input_ids.to(device)
+    
+    with torch.no_grad():
+        prediction_tensor = combined_model(input_ids)
+        predicted_score = prediction_tensor.item()
+        results.append({
+            "text": item['text'],
+            "true_answer": float(item['answer']),
+            "predicted_score": predicted_score  
+        })
+
+output_path = Path(latest_model_path) / "predictions.json"
+with open(output_path, "w") as f:
+    json.dump(results, f, indent=2)
+
+logger.success(f"Evaluation scores saved to {output_path}")

@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 accelerate==1.10.0
 aiohappyeyeballs==2.6.1
 aiohttp==3.12.15
@@ -21,7 +20,6 @@ gitpython==3.1.45
 gputil==1.4.0
 hf-xet==1.1.7
 huggingface-hub==0.34.4
--e file:///home/alvin/hyper-surrogate-model
 idna==3.10
 jinja2==3.1.6
 joblib==1.5.1
@@ -75,7 +73,7 @@ smmap==5.0.2
 sympy==1.14.0
 threadpoolctl==3.6.0
 tokenizers==0.21.4
-torch==2.8.0
+torch>=2.0,<2.9
 tqdm==4.67.1
 transformers==4.55.2
 triton==3.4.0
@@ -86,11 +84,9 @@ urllib3==2.5.0
 wandb==0.21.3
 xxhash==3.5.0
 yarl==1.20.1
-=======
 # Enhanced LLM Model Requirements
 
 # Core ML libraries
-torch==2.0.0
 transformers>=4.30.0
 datasets>=2.10.0
 peft>=0.4.0
@@ -135,4 +131,3 @@ tensorboard>=2.13.0
 # Data preprocessing
 nas-bench-201
 pyarrow
->>>>>>> 7f3a0c498788c470492c5fed212f6bdd6b0a152a

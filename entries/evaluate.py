@@ -1,7 +1,7 @@
 import json
 import numpy as np
 import pandas as pd
-from scipy.stats import spearmanr
+from scipy.stats import spearmanr, kendalltau
 import matplotlib.pyplot as plt
 from hypersurrogatemodel import Logger
 
@@ -16,22 +16,20 @@ def calculate_metrics(predictions_path: str):
         logger.error(f"Error: File not found at '{predictions_path}'. Please check the file path.")
         return
 
-    true_values = np.array([item['answer'] for item in data])
-    predicted_values = np.array([item['prediction'] for item in data])
+    true_values = np.array([item['true_answer'] for item in data])
+    predicted_values = np.array([item['predicted_score'] for item in data])
 
     logger.info("Calculation complete. Here are the model evaluation results:")
     print("-" * 60)
 
-    mse = np.mean((true_values - predicted_values) ** 2)
-    rmse = np.sqrt(mse)
-    logger.step(f"Mean Squared Error (MSE): {mse:.4f}")
-    logger.step(f"Root Mean Squared Error (RMSE): {rmse:.4f}")
-    print(f"  (Indicates predictions deviate by an average of {rmse:.2f} percentage points)")
-    print("-" * 60)
-
     spearman_corr, _ = spearmanr(true_values, predicted_values)
     logger.step(f"Spearman's Rank Correlation (Rho): {spearman_corr:.4f}")
-    print("  (A key metric for surrogate models. Closer to 1.0 means better ranking ability.)")
+    print("   (A key metric for surrogate models. Closer to 1.0 means better ranking ability.)")
+    print("-" * 60)
+
+    kendall_tau, _ = kendalltau(true_values, predicted_values)
+    logger.step(f"Kendall's Rank Correlation (Tau): {kendall_tau:.4f}")
+    print("   (Another strong indicator of ranking quality. Closer to 1.0 is better.)")
     print("-" * 60)
 
     logger.step("Top-k Set Overlap Analysis:")
@@ -56,16 +54,16 @@ def calculate_metrics(predictions_path: str):
     # --- Markdown Table Export Section ---
     results_data = {
         "Metric": [
-            "RMSE",
             "Spearman's Rho",
+            "Kendall's Tau",
             "Top-10 Overlap (%)",
             "Top-50 Overlap (%)",
             "Top-100 Overlap (%)",
             "Top-500 Overlap (%)"
         ],
         "Value": [
-            f"{rmse:.4f}",
             f"{spearman_corr:.4f}",
+            f"{kendall_tau:.4f}",
             f"{top_k_results['Top-10 Overlap (%)']:.2f}",
             f"{top_k_results['Top-50 Overlap (%)']:.2f}",
             f"{top_k_results['Top-100 Overlap (%)']:.2f}",
@@ -88,14 +86,11 @@ def calculate_metrics(predictions_path: str):
     
     # --- Visualization Section ---
     plt.figure(figsize=(10, 8))
-    plt.scatter(true_values, predicted_values, alpha=0.3, label="Architectures")
+    plt.scatter(true_values, predicted_values, alpha=0.3, label=f"Spearman's ρ = {spearman_corr:.4f}")
     
-    perfect_line = np.linspace(min(true_values), max(true_values), 100)
-    plt.plot(perfect_line, perfect_line, color='red', linestyle='--', label="Perfect Prediction (y=x)")
-    
-    plt.title("Truth vs. Predicted Accuracy")
-    plt.xlabel("Truth Accuracy (%)")
-    plt.ylabel("Predicted Accuracy (%)")
+    plt.title("True Accuracy vs. Predicted Ranking Score")
+    plt.xlabel("True Accuracy")
+    plt.ylabel("Predicted Ranking Score (Unitless)") 
     plt.grid(True)
     plt.legend()
     

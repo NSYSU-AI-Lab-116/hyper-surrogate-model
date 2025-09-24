@@ -72,45 +72,54 @@ class TrainableLLM(nn.Module):
             "logits": outputs.logits if hasattr(outputs, 'logits') else None,
             "loss": outputs.loss if (hasattr(outputs, 'loss') and outputs.loss is not None) else None,
         }
-        
+        print(result["loss"])
+        input()
         # Numerical prediction
-        if self.numerical_head is not None:
-            hidden_states = outputs.hidden_states[-1] if (hasattr(outputs, 'hidden_states') and outputs.hidden_states is not None) else None
+        if not hasattr(outputs, "hidden_states"):
+            raise RuntimeError("Addition hidden layer not working")
+        hidden_states = outputs.hidden_states[-1]
+        
+        # re-run with output_hidden_states
+        if hidden_states is None:
+            with torch.no_grad():
+                model_outputs = self.model(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    output_hidden_states=True,
+                    return_dict=True,
+                    **kwargs
+                )
+                hidden_states = model_outputs.hidden_states[-1]
+        
+        # Pool last token according to attention_mask (safer than fixed -1)
+        if attention_mask is None:
+            last_hidden_states = hidden_states[:, -1, :]
+            logger.warning("Attention mask not provided; using last token for pooling.")
+        else:
+            attn = attention_mask.to(hidden_states.device)
+            # 確保為整數且至少為 1，避免 -1 索引
+            seq_lens = attn.long().sum(dim=1).clamp(min=1) - 1  # shape (B,)
+            batch_idx = torch.arange(hidden_states.size(0), device=hidden_states.device)
+            last_hidden_states = hidden_states[batch_idx, seq_lens, :]  # shape (B, H)
             
-            if hidden_states is None:
-                # Fallback: re-run with output_hidden_states
-                with torch.no_grad():
-                    model_outputs = self.model(
-                        input_ids=input_ids,
-                        attention_mask=attention_mask,
-                        output_hidden_states=True,
-                        return_dict=True,
-                        **kwargs
-                    )
-                    hidden_states = model_outputs.hidden_states[-1]
-            
-            # Pool last token according to attention_mask (safer than fixed -1)
-            if attention_mask is not None:
-                sequence_lengths = attention_mask.sum(dim=1) - 1
-                BATCH_SIZE = hidden_states.size(0)
-                last_hidden_states = hidden_states[range(BATCH_SIZE), sequence_lengths]
-            else:
-                last_hidden_states = hidden_states[:, -1, :]
-                logger.warning("Attention mask not provided; using last token for pooling.")
-            
-            last_hidden_states = last_hidden_states.to(next(self.numerical_head.parameters()).device)  # type: ignore # ensure to set self.numerical_head device
-            numerical_outputs = self.numerical_head(last_hidden_states)  # type: ignore
-            result["numerical_outputs"] = numerical_outputs
-            
-            # Calculate numerical loss if targets provided
-            if numerical_targets is not None:
-                numerical_targets = numerical_targets.to(numerical_outputs.device).float()
-                numerical_loss = nn.MSELoss()(numerical_outputs, numerical_targets)
-                result["loss"] = numerical_loss if result["loss"] is None else (result["loss"] + numerical_loss)
+        last_hidden_states = last_hidden_states.to(next(self.numerical_head.parameters()).device)  # type: ignore # ensure to set self.numerical_head device
+        numerical_outputs = self.numerical_head(last_hidden_states)  # type: ignore
+        result["numerical_outputs"] = numerical_outputs
+        
+        # Calculate numerical loss if targets provided
+        if numerical_targets is not None:
+            numerical_targets = numerical_targets.to(numerical_outputs.device).float()
+            numerical_loss = self.loss_fn(numerical_outputs, numerical_targets)
+            result["loss"] = numerical_loss if result["loss"] is None else (result["loss"] + numerical_loss)
                 
         if numerical_targets is not None and result["loss"] is None:
             logger.error(f"Numerical loss is None despite targets being provided.")
         return result
+    
+    def loss_fn(self, predictions, targets):
+        if predictions.shape != targets.shape:
+            raise ValueError(f"Predictions shape {predictions.shape} does not match targets shape {targets.shape}")
+        return nn.MSELoss()(predictions, targets)
     
     def _setup_lora(self, lora_config: Optional[Dict[str, Any]] = None) -> None:
         
@@ -310,7 +319,7 @@ class TrainableLLM(nn.Module):
             "numerical_head_parameters": numerical_params,
         }
     
-    def trainer(self, ):
+    def acc_trainer(self, ):
         with open(config.dataset.train_data_path, 'r') as f:
             train_data = json.load(f)
 
@@ -325,7 +334,8 @@ class TrainableLLM(nn.Module):
 
         logger.info(f"total train of {total_batches} batches ({EPOCHS} EPOCHS × {batches_per_epoch} batches/epoch)")
 
-        optimizer = AdamW(self.model.parameters(), lr=config.training.learning_rate)
+        params = list(self.model.parameters()) + list(self.numerical_head.parameters())
+        optimizer = AdamW(params, lr=config.training.learning_rate)
 
         # Training progress bars
         epoch_pbar = tqdm(

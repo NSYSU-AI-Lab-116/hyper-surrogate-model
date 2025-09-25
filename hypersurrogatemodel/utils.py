@@ -5,14 +5,12 @@ This module provides common utility functions used across the Enhanced LLM Model
 """
 
 import torch
-import torch.nn as nn
 import numpy as np
 import random
 import logging
 import os 
 from typing import Dict, Any, List, Optional, Union
-from pathlib import Path
-
+import GPUtil
 class ColoredFormatter(logging.Formatter):
     """
     Custom formatter to add colors to log messages.
@@ -204,3 +202,71 @@ def get_system_info() -> Dict[str, Any]:
         info["cuda_memory_reserved_gb"] = torch.cuda.memory_reserved() / (1024**3)
     
     return info
+
+def get_gpu_utilization() -> Dict[str, Any]:
+    """
+    Get GPU utilization percentage and memory usage using GPUtil.
+    
+    Returns:
+        Dictionary containing GPU utilization information
+    """
+    gpu_info = {
+        "available": False,
+        "devices": [],
+        "total_memory_gb": 0.0,
+        "used_memory_gb": 0.0,
+        "free_memory_gb": 0.0,
+        "memory_utilization_percent": 0.0,
+        "gpu_utilization_percent": 0.0
+    }
+    
+    if not torch.cuda.is_available():
+        logger.debug("CUDA not available")
+        return gpu_info
+    
+    gpu_info["available"] = True
+    try:
+        # Get all GPUs
+        gpus = GPUtil.getGPUs()
+        
+        if not gpus:
+            logger.warning("No GPUs found by GPUtil")
+            return _get_gpu_utilization_torch_fallback()
+        
+        total_gpu_util = 0.0
+        total_memory_used = 0.0
+        total_memory_total = 0.0
+        
+        for gpu in gpus:
+            # GPUtil provides memory in MB, convert to GB
+            memory_used_gb = gpu.memoryUsed / 1024
+            memory_total_gb = gpu.memoryTotal / 1024
+            memory_free_gb = gpu.memoryFree / 1024
+            memory_util_percent = gpu.memoryUtil * 100  # GPUtil gives as fraction
+            
+            device_info = {
+                "gpu_utilization_percent": gpu.load * 100,  # GPUtil gives as fraction
+                "memory_used_gb": memory_used_gb,
+                "memory_total_gb": memory_total_gb,
+                "memory_free_gb": memory_free_gb,
+                "memory_utilization_percent": memory_util_percent,
+                "temperature_c": gpu.temperature,
+            }
+            
+            gpu_info["devices"].append(device_info)
+            total_gpu_util += gpu.load * 100
+            total_memory_used += memory_used_gb
+            total_memory_total += memory_total_gb
+        
+        # Calculate averages
+        gpu_count = len(gpus)
+        gpu_info["gpu_utilization_percent"] = total_gpu_util / gpu_count if gpu_count > 0 else 0.0
+        gpu_info["total_memory_gb"] = total_memory_total
+        gpu_info["used_memory_gb"] = total_memory_used
+        gpu_info["free_memory_gb"] = total_memory_total - total_memory_used
+        gpu_info["memory_utilization_percent"] = (total_memory_used / total_memory_total * 100) if total_memory_total > 0 else 0.0
+        
+    except Exception as e:
+        logger.warning(f"Failed to get GPU utilization with GPUtil: {e}")
+    
+    return gpu_info

@@ -125,15 +125,23 @@ class ConfigManager:
     Simple YAML configuration manager.
     Loads configuration from YAML file with fallback to default values.
     """
+    _instance = None
+    _config_loaded = False
+    run_mode = None # Options: data, train, eval
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
     
-    def __init__(self, run_mode, config_path: Optional[Union[str, Path]] = None):
+    def load_config(self, config_path: Optional[Union[str, Path]] = None):
         """
         Initialize configuration manager.
         
         Args:
             config_path: Path to YAML configuration file (default: config.yaml)
         """
-        self.run_mode = run_mode
+        if self._config_loaded:
+            return self.config
         if config_path:
             self.config_path = Path(config_path)
         else:
@@ -535,5 +543,21 @@ class ConfigManager:
                 print(f"  {key}: {value}")
 
 
-# Global configuration instance
-config = ConfigManager(run_mode="train")
+def get_config(config_path: Optional[Union[str, Path]] = None):
+    """Get the singleton configuration instance."""
+    config_manager = ConfigManager()
+    if not config_manager._config_loaded:
+        config_manager.load_config(config_path)
+    return config_manager
+
+class LazyConfig:
+    def __getattr__(self, name):
+        # 第一次訪問時才初始化配置
+        config_instance = get_config()
+        # 將所有屬性複製到 self，避免重複初始化
+        for attr_name in dir(config_instance):
+            if not attr_name.startswith('_'):
+                setattr(self, attr_name, getattr(config_instance, attr_name))
+        return getattr(self, name)
+
+config = LazyConfig()

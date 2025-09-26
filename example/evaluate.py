@@ -59,26 +59,31 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 combined_model.to(device)
 combined_model.eval()
 
-with open("./data/processed/NAS_bench_201/cifar10_test_set.json", "r") as f:
-    data = json.load(f)
+with open("./data/processed/NAS_bench_201_train/cifar10_train.json", "r") as f:
+    train_data = json.load(f)
+with open("./data/processed/NAS_bench_201_test/cifar100_test.json", "r") as f:
+    test_data = json.load(f)
+
+data = train_data + test_data
 logger.info(f"read {len(data)} data, start predicting.")
 
-
+temp = "uid:{uid}, structure:{unified_text_description}"
 results = []
+
 for item in tqdm(data, desc="Generatingg scores"):
     #print(f"Processing item: {item['text']}...")
-    input_ids = tokenizer(item['text'], return_tensors="pt").input_ids
+    input_text = temp.format(uid=item['uid'],unified_text_description=item['unified_text_description'])
+    input_ids = tokenizer(input_text, return_tensors="pt").input_ids
     input_ids = input_ids.to(device)
     
     with torch.no_grad():
         prediction_tensor = combined_model(input_ids)
         predicted_score = prediction_tensor.item()
         results.append({
-            "text": item['text'],
-            "true_answer": float(item['answer']),
+            "text": input_text,
+            "true_answer": float(item['true_acc']),
             "predicted_score": predicted_score  
         })
-
 output_path = Path(latest_model_path) / "predictions.json"
 with open(output_path, "w") as f:
     json.dump(results, f, indent=2)

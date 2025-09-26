@@ -181,7 +181,7 @@ def get_device(prefer_gpu: bool = True) -> torch.device:
     return device
 
 
-def get_system_info() -> Dict[str, Any]:
+def get_system_info() -> dict[str, Any]:
     """
     Get comprehensive system information.
     
@@ -229,22 +229,19 @@ def get_gpu_utilization() -> Dict[str, Any]:
         # Get all GPUs
         gpus = GPUtil.getGPUs()
         
-        if not gpus:
-            logger.warning("No GPUs found by GPUtil")
-            return _get_gpu_utilization_torch_fallback()
-        
         total_gpu_util = 0.0
         total_memory_used = 0.0
         total_memory_total = 0.0
-        
-        for gpu in gpus:
+        for gpu in gpus:  # 修復：直接迭代 gpus，不是 gpus[0]
             # GPUtil provides memory in MB, convert to GB
             memory_used_gb = gpu.memoryUsed / 1024
             memory_total_gb = gpu.memoryTotal / 1024
             memory_free_gb = gpu.memoryFree / 1024
             memory_util_percent = gpu.memoryUtil * 100  # GPUtil gives as fraction
-            
+
             device_info = {
+                "id": gpu.id,
+                "name": gpu.name,
                 "gpu_utilization_percent": gpu.load * 100,  # GPUtil gives as fraction
                 "memory_used_gb": memory_used_gb,
                 "memory_total_gb": memory_total_gb,

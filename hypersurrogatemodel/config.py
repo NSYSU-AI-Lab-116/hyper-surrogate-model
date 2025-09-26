@@ -21,22 +21,8 @@ class ModelConfig:
     """Model configuration settings."""
     pretrained_model: str
     transfer_model_path: str
-    use_lora: bool 
     device: str 
     num_outputs: int 
-
-
-@dataclass
-class GenerationConfig:
-    """Generation configuration settings."""
-    max_new_tokens: int 
-    temperature: float 
-    do_sample: bool 
-    top_k: int 
-    top_p: float 
-    repetition_penalty: float 
-    length_penalty: float 
-    num_beams: int 
 
 
 @dataclass
@@ -140,8 +126,6 @@ class ConfigManager:
         Args:
             config_path: Path to YAML configuration file (default: config.yaml)
         """
-        if self._config_loaded:
-            return self.config
         if config_path:
             self.config_path = Path(config_path)
         else:
@@ -152,7 +136,6 @@ class ConfigManager:
         
         # Initialize configuration objects
         self.model = self._create_model_config()
-        self.generation = self._create_generation_config()
         self.training = self._create_training_config()
         self.lora = self._create_lora_config()
         self.dataset = self._create_dataset_config()
@@ -169,7 +152,6 @@ class ConfigManager:
         elif self.run_mode == "train" and self.training.train_type == "from_pretrained":
             self._check_config_exist(
                 self.model.pretrained_model,
-                self.model.use_lora,         # model
                 self.training.batch_size,
                 self.training.learning_rate,
                 self.training.num_epochs,
@@ -187,7 +169,6 @@ class ConfigManager:
         elif self.run_mode == "train" and self.training.train_type == "from_saved":
             self._check_config_exist(
                 self.model.transfer_model_path,
-                self.model.use_lora,         # model
                 self.training.batch_size,
                 self.training.learning_rate,
                 self.training.num_epochs,
@@ -250,22 +231,8 @@ class ConfigManager:
         return ModelConfig(
             pretrained_model=self._get_config_value("model", "pretrained_model", "google/gemma-2-2b-it"),
             transfer_model_path=self._get_config_value("model", "transfer_model_path", None),
-            use_lora=self._get_config_value("model", "use_lora", True, bool),
             device=self._get_config_value("model", "device", "auto"),
             num_outputs=self._get_config_value("model", "num_outputs", 1, int),
-        )
-
-    def _create_generation_config(self) -> GenerationConfig:
-        """Create generation configuration."""
-        return GenerationConfig(
-            max_new_tokens=self._get_config_value("generation", "max_new_tokens", 50, int),
-            temperature=self._get_config_value("generation", "temperature", 0.7, float),
-            do_sample=self._get_config_value("generation", "do_sample", True, bool),
-            top_k=self._get_config_value("generation", "top_k", 64, int),
-            top_p=self._get_config_value("generation", "top_p", 0.95, float),
-            repetition_penalty=self._get_config_value("generation", "repetition_penalty", 1.1, float),
-            length_penalty=self._get_config_value("generation", "length_penalty", 1.0, float),
-            num_beams=self._get_config_value("generation", "num_beams", 1, int),
         )
 
     def _create_training_config(self) -> TrainingConfig:
@@ -362,8 +329,6 @@ class ConfigManager:
                     config_class = LoRAConfig
                 elif section == 'hyper':
                     config_class = HyperConfig
-                elif section == 'generation':
-                    config_class = GenerationConfig
                 elif section == 'comparison':
                     config_class = ComparisonConfig
                 
@@ -391,6 +356,7 @@ class ConfigManager:
                 return any(isinstance(value, t) for t in valid_types)
         
         return isinstance(value, expected_type)
+    
     def _trace_variable_path(self, frame, arg_index: int) -> str:
         try:
             filename = frame.f_code.co_filename
@@ -470,19 +436,8 @@ class ConfigManager:
             "model": {
                 "pretrained_model": self.model.pretrained_model,
                 "transfer_model_path": self.model.transfer_model_path,
-                "use_lora": self.model.use_lora,
                 "device": self.model.device,
                 "num_outputs": self.model.num_outputs,
-            },
-            "generation": {
-                "max_new_tokens": self.generation.max_new_tokens,
-                "temperature": self.generation.temperature,
-                "do_sample": self.generation.do_sample,
-                "top_k": self.generation.top_k,
-                "top_p": self.generation.top_p,
-                "repetition_penalty": self.generation.repetition_penalty,
-                "length_penalty": self.generation.length_penalty,
-                "num_beams": self.generation.num_beams,
             },
             "training": {
                 "train_type": self.training.train_type,
@@ -552,9 +507,7 @@ def get_config(config_path: Optional[Union[str, Path]] = None):
 
 class LazyConfig:
     def __getattr__(self, name):
-        # 第一次訪問時才初始化配置
         config_instance = get_config()
-        # 將所有屬性複製到 self，避免重複初始化
         for attr_name in dir(config_instance):
             if not attr_name.startswith('_'):
                 setattr(self, attr_name, getattr(config_instance, attr_name))

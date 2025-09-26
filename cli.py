@@ -8,14 +8,9 @@ from hypersurrogatemodel import Logger
 logger = Logger("CLI")
 
 
-def train_new():
+def train():
     """Start new training"""
-    script_path = Path(__file__).parent / "entries_accuracy" / "training_init.py"
-    subprocess.run([sys.executable, str(script_path)])
-
-def train_continue():
-    """Continue training from saved model"""
-    script_path = Path(__file__).parent / "entries_accuracy" / "training_transfer.py"
+    script_path = Path(__file__).parent / "entries_accuracy" / "training.py"
     subprocess.run([sys.executable, str(script_path)])
 
 def evaluate():

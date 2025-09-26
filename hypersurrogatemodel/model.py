@@ -3,11 +3,12 @@ os.environ['TRANSFORMERS_VERBOSITY'] = 'error'
 os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
 
-from typing import Optional, Dict, Any, Union, Literal
+from typing import Any, Literal
 import json
 
 import torch
 import torch.nn as nn
+import os 
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from torch.optim import AdamW
 from peft import LoraConfig, get_peft_model, TaskType
@@ -15,7 +16,7 @@ from tqdm import tqdm
 import numpy as np
 from accelerate import Accelerator
 from torch.utils.data import DataLoader, Dataset
-from .utils import Logger , get_gpu_utilization as gpu_u
+from .utils import Logger , get_gpu_utilization as gpu_util
 from .config import config
 
 logger = Logger("model")
@@ -93,7 +94,7 @@ class TrainableLLM(nn.Module):
     def __init__(
         self,
         load_type: Literal["from_pretrained", "from_saved"],
-        use_lora: Optional[bool] | None = None,
+        use_lora: bool | None = None,
         num_outputs: int = 1,
     ):
         """
@@ -106,15 +107,9 @@ class TrainableLLM(nn.Module):
             num_outputs: Number of numerical outputs (for regression tasks)
         """
         super().__init__()
-        self.use_lora = use_lora if use_lora is not None else config.model.use_lora
+        self.use_lora = use_lora if use_lora is not None else False
         self.num_outputs = num_outputs
         self.load_model(load_type=load_type)
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.model = self.model.to(self.device) # type: ignore
-        if hasattr(self, 'numerical_head') and self.numerical_head is not None:
-            self.numerical_head = self.numerical_head.to(self.device) # type: ignore
-        logger.info(f"Model loaded and moved to {self.device}")  
-        
         logger.info("Model initialization complete.")   
 
     def forward(
@@ -183,7 +178,7 @@ class TrainableLLM(nn.Module):
             raise ValueError(f"Predictions shape {predictions.shape} does not match targets shape {targets.shape}")
         return nn.MSELoss()(predictions, targets)
     
-    def _setup_lora(self, lora_config: Optional[Dict[str, Any]] = None) -> None:
+    def _setup_lora(self, lora_config: dict[str, Any] | None = None) -> None:
         
         """Set up LoRA configuration"""
         if lora_config is None:
@@ -261,16 +256,16 @@ class TrainableLLM(nn.Module):
                
     def save_model(
         self,
-        model_name: Optional[str] = None,
+        model_name: str | None  = None,
         save_training_state: bool = True, 
-        optimizer: Optional[torch.optim.Optimizer] = None,
-        scheduler: Optional[Any] = None,
-        epoch: Optional[int] = None,
-        step: Optional[int] = None,
-        loss: Optional[float] = None,
-        dataset_path: Optional[str] = None,
-        batch_size: Optional[int] = None,
-        loss_history: Optional[list] = None,
+        optimizer: torch.optim.Optimizer | None = None,
+        scheduler: Any | None= None,
+        epoch: int | None = None,
+        step: int | None = None,
+        loss: float | None = None,
+        dataset_path: str | None = None,
+        batch_size: int | None = None,
+        loss_history: list | None = None,
         ) -> None:
         
         """
@@ -354,11 +349,12 @@ class TrainableLLM(nn.Module):
             torch.save(training_state, os.path.join(save_path, "training_state.pt"))
             logger.info(f"Training state saved to {save_path}/training_state.pt")
         
+        os.makedirs(os.path.join(save_path,"analysis"), exist_ok=True)
         if loss_history is not None:
-            np.save(os.path.join(save_path, "loss_history.npy"), np.array(loss_history))
+            np.save(os.path.join(save_path, "analysis", "loss_history.npy"), np.array(loss_history))
             logger.info(f"Loss history saved to {save_path}/loss_history.npy")
     
-    def get_model_info(self) -> Dict[str, Any]:
+    def get_model_info(self) -> dict[str, Any]:
         """
         Get information about the model.
         
@@ -386,175 +382,19 @@ class TrainableLLM(nn.Module):
             "numerical_head_parameters": numerical_params,
         }
     
-    def acc_trainer(self):
-        """Enhanced training method using Accelerate for better performance and scalability"""
-        
-        # Initialize accelerator
-        accelerator = Accelerator(
-            mixed_precision="fp16" if torch.cuda.is_available() else "no",
-            gradient_accumulation_steps=getattr(config.training, 'gradient_accumulation_steps', 1),
-            log_with=None,  # Can be set to "wandb", "tensorboard", etc.
-            project_dir=getattr(config.hyper, 'save_basepath', './outputs')
-        )
-        
-        # Load training data
-        with open(config.dataset.train_data_path, 'r') as f:
-            train_data = json.load(f)
+    def train_mode(self):
+        self.model.train()
+        if hasattr(self, 'numerical_head') and self.numerical_head is not None:
+            self.numerical_head.train()
+    
+    def eval_mode(self):
+        self.model.eval()
+        if hasattr(self, 'numerical_head') and self.numerical_head is not None:
+            self.numerical_head.eval()
 
-        train_length = len(train_data)
-        logger.info(f"Loaded {train_length} training samples")
-        
-        BATCH_SIZE = config.training.batch_size
-        EPOCHS = config.training.num_epochs
-        
-        # Create dataset and dataloader
-        train_dataset = TrainingDataset(train_data, self.tokenizer, max_length=512)
-        train_dataloader = DataLoader(
-            train_dataset, 
-            batch_size=BATCH_SIZE, 
-            shuffle=True,
-            collate_fn=collate_fn,
-            num_workers=0,
-            pin_memory=True if torch.cuda.is_available() else False
-        )
-        
-        # Setup optimizer
-        params = list(self.model.parameters()) + list(self.numerical_head.parameters())
-        optimizer = AdamW(params, lr=config.training.learning_rate)
-        
-        # Prepare everything with accelerator
-        self.model, self.numerical_head, optimizer, train_dataloader = accelerator.prepare(
-            self.model, self.numerical_head, optimizer, train_dataloader
-        )
-        
-        # Calculate total steps
-        num_update_steps_per_epoch = len(train_dataloader)
-        max_train_steps = EPOCHS * num_update_steps_per_epoch
-        
-        # Log training info
-        logger.info(f"***** Running training *****")
-        logger.info(f"  Num examples = {train_length}")
-        logger.info(f"  Num Epochs = {EPOCHS}")
-        logger.info(f"  Batch size per device = {BATCH_SIZE}")
-        logger.info(f"  Total train batch size = {BATCH_SIZE * accelerator.num_processes}")
-        logger.info(f"  Gradient Accumulation steps = {accelerator.gradient_accumulation_steps}")
-        logger.info(f"  Total optimization steps = {max_train_steps}")
-        
-        # Training progress tracking
-        loss_history = []
-        global_step = 0
-        
-        epoch_bar = tqdm(
-            range(EPOCHS), 
-            desc="Epochs", 
-            leave=True,
-            disable=not accelerator.is_local_main_process,
-            position=0
-        )
-        gpu_util = tqdm(
-            total=0,
-            desc="Device util", 
-            leave=True,
-            disable=not accelerator.is_local_main_process,
-            position=2,
-            bar_format='{desc}: {postfix}'
-        )
-        
-        # Training strat
-        for epoch in range(EPOCHS):
-            self.model.train()
-            total_loss = 0
-            batch_bar = tqdm(
-                range(len(train_dataloader)),
-                desc="Batches",
-                leave=False,
-                position=1
-            )
-            for step, batch in enumerate(train_dataloader):
-                # Forward pass
-                outputs = self(
-                    input_ids=batch["input_ids"],
-                    attention_mask=batch["attention_mask"],
-                    numerical_targets=batch["numerical_targets"]
-                )
-                
-                loss = outputs.get('loss')
-                if loss is None:
-                    logger.error(f"Warning: Loss is None at step {step}")
-                    continue
-                
-                accelerator.backward(loss)
-                
-                optimizer.step()
-                optimizer.zero_grad()
-                
-                total_loss += loss.detach().float()
-                global_step += 1
-                
-                # Update progress bar
-                if accelerator.is_local_main_process:
-                    batch_bar.update(1)
-                    avg_loss = total_loss / (step + 1)
-                    batch_bar.set_postfix({
-                        'loss': f'{avg_loss:.4f}'
-                    })
-                    loss_history.append(avg_loss.item())
-                
-                # Clear cache periodically
-                if global_step % 10 == 0 and torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-                    gpu_info = gpu_u()
-                    gpu_util_percent = gpu_info.get('gpu_utilization_percent', 0)
-                    gpu_mem_percent = gpu_info.get('memory_utilization_percent', 0)
-                    gpu_used_gb = gpu_info.get('used_memory_gb', 0)
-                    gpu_total_gb = gpu_info.get('total_memory_gb', 0)
-                    
-                    gpu_util.set_postfix_str(
-                        f"GPU Util: {gpu_util_percent:.1f}% | "
-                        f"GPU Mem: {gpu_mem_percent:.1f}% ({gpu_used_gb:.1f}GB/{gpu_total_gb:.1f}GB)"
-                    )
-                    
-            
-            
-            if accelerator.is_local_main_process:
-                batch_bar.close()
-                epoch_bar.update(1)
-                epoch_avg_loss = total_loss / len(train_dataloader)
-                epoch_bar.set_postfix({
-                    'epoch': f'{epoch+1}/{EPOCHS}',
-                    'loss': f'{epoch_avg_loss:.4f}'
-                })
-                
-        epoch_bar.close()
-        accelerator.wait_for_everyone()
-        
-        # Save model (only on main process)
-        if accelerator.is_local_main_process:
-            logger.success("Training completed!")
-            
-            unwrapped_model = accelerator.unwrap_model(self.model)
-            unwrapped_numerical_head = accelerator.unwrap_model(self.numerical_head)
-            
-            original_model = self.model
-            original_head = self.numerical_head
-            self.model = unwrapped_model
-            self.numerical_head = unwrapped_numerical_head
-            
-            # Save the model
-            # self.save_model(
-            #     model_name=self.model_path,
-            #     save_training_state=True,
-            #     optimizer=optimizer,
-            #     epoch=EPOCHS,
-            #     dataset_path=config.dataset.train_data_path,
-            #     batch_size=BATCH_SIZE,
-            #     loss_history=loss_history if loss_history else None
-            # )
-            
-            # Restore original references
-            self.model = original_model
-            self.numerical_head = original_head
-        
-        # Final cleanup
-        accelerator.end_training()
-        logger.info("Accelerated training completed successfully!")
+    def params(self):
+        return list(self.model.parameters()) + list(self.numerical_head.parameters())  # type: ignore
+    
+    def get_gpu_memory_usage(self):
+        """Get current GPU memory usage for all devices."""
+        return gpu_util()

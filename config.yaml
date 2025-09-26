@@ -14,15 +14,6 @@ dataset:
   preprocess_train_path: ./data/processed/NAS_bench_201_train
   template_type: generation
   truncation: true
-generation:
-  do_sample: true
-  length_penalty: 1.0
-  max_new_tokens: 256
-  num_beams: 1
-  repetition_penalty: 1.1
-  temperature: 0.7
-  top_k: 64
-  top_p: 0.95
 lora:
   lora_alpha: 32
   lora_dropout: 0.1
@@ -46,7 +37,7 @@ run_mode:
   mode: trans_train
 training:
   train_type: from_pretrained
-  batch_size: 12
+  batch_size: 24
   learning_rate: 2e-5
   num_epochs: 12
   gradient_accumulation_steps: 1

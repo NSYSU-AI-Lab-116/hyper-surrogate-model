@@ -34,7 +34,8 @@ dev = [
 ]
 
 [project.scripts]
-train = "cli:train"
+train_acc = "cli:train_acc"
+train_rank = "cli:train_rank"
 eval = "cli:evaluate"
 data = "cli:data_process"
 

@@ -31,7 +31,7 @@ def acc_trainer() -> None:
         
         device = get_device(prefer_gpu=True)
         # Wrap the model with DataParallel
-        if False:#torch.cuda.device_count() > 1:
+        if torch.cuda.device_count() > 1:
             logger.info(f"Using {torch.cuda.device_count()} GPUs with DataParallel")
             dp_model = torch.nn.DataParallel(model)
             dp_model = dp_model.to(device)

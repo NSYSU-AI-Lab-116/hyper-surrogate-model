@@ -38,6 +38,7 @@ train_acc = "cli:train_acc"
 train_rank = "cli:train_rank"
 eval = "cli:evaluate"
 data = "cli:data_process"
+train_test = "cli:train_test"
 
 [tool.hatch.envs.default]
 dependencies = [

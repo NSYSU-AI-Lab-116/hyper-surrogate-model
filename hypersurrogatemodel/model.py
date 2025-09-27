@@ -10,12 +10,10 @@ import torch
 import torch.nn as nn
 import os 
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from torch.optim import AdamW
 from peft import LoraConfig, get_peft_model, TaskType
-from tqdm import tqdm
 import numpy as np
 from accelerate import Accelerator
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import Dataset
 from .utils import Logger , get_gpu_utilization as gpu_util
 from .config import config
 
@@ -160,7 +158,7 @@ class TrainableLLM(nn.Module):
             batch_idx = torch.arange(hidden_states.size(0), device=hidden_states.device)
             last_hidden_states = hidden_states[batch_idx, seq_lens, :]  # shape (B, H)
             
-        last_hidden_states = last_hidden_states.to(next(self.numerical_head.parameters()).device)  # type: ignore # ensure to set self.numerical_head device
+        last_hidden_states = last_hidden_states.to(self.numerical_head[0].weight.device)  # type: ignore # ensure to set self.numerical_head device
         numerical_outputs = self.numerical_head(last_hidden_states)  # type: ignore
         result["numerical_outputs"] = numerical_outputs
         

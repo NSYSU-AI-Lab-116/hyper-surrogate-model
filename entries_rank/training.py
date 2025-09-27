@@ -3,6 +3,7 @@ import os
 import json
 import pandas as pd
 from requests import get
+from sympy import use
 import torch
 from torch.optim import AdamW
 from tqdm import tqdm
@@ -32,7 +33,7 @@ def train_with_dataset(dataset_path, model_path="./saved_model", epochs=6, batch
     
     logger.info(f"total train of {total_batches} batches ({epochs} epochs × {batches_per_epoch} batches/epoch)")
     
-    model = TrainableLLM(load_type="from_pretrained")
+    model = TrainableLLM(load_type="from_pretrained", use_lora=True)
     device = get_device(prefer_gpu=True)
     if False:#torch.cuda.device_count() > 1:
             logger.info(f"Using {torch.cuda.device_count()} GPUs with DataParallel")
@@ -173,7 +174,7 @@ def train_with_dataset(dataset_path, model_path="./saved_model", epochs=6, batch
                 'Epoch': f'{epoch+1}/{epochs}'
             })
             
-            if total_batches % 5 == 0:
+            if i % 5 == 0:
                 gpu_util_percent = []
                 gpu_mem_percent = []
                 gpu_used_gb = []
@@ -213,4 +214,4 @@ def train_with_dataset(dataset_path, model_path="./saved_model", epochs=6, batch
 
 if __name__ == "__main__":
     train_with_dataset(dataset_path=Path("./data/processed/NAS_bench_201_train/cifar10_train.json"),
-                       epochs=config.training.num_epochs, batch_size=config.training.batch_size//2, learning_rate=config.training.learning_rate)
+                       epochs=config.training.num_epochs, batch_size=config.training.batch_size, learning_rate=config.training.learning_rate)

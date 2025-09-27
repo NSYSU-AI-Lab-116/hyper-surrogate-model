@@ -4,12 +4,14 @@ Utility Functions Module
 This module provides common utility functions used across the Enhanced LLM Model system.
 """
 
+import torch.distributed as dist
 import torch
 import numpy as np
 import random
 import logging
 import os 
-from typing import Dict, Any, List, Optional, Union
+from typing import Any
+from tqdm import tqdm
 import GPUtil
 class ColoredFormatter(logging.Formatter):
     """
@@ -154,7 +156,7 @@ def set_random_seed(seed: int = 42) -> None:
     logger.debug(f"Random seed set to {seed}")
 
 
-def get_device(prefer_gpu: bool = True) -> torch.device:
+def get_device(prefer_gpu: bool = True, called = [False]) -> torch.device:
     """
     Get the best available device for training/inference.
     
@@ -181,6 +183,21 @@ def get_device(prefer_gpu: bool = True) -> torch.device:
     return device
 
 
+def setup_distributed():
+    """Initialize the process group for DistributedDataParallel."""
+    # 從環境變量獲取 local_rank
+    local_rank = int(os.environ.get("LOCAL_RANK", 0))
+    
+    # 在初始化進程組前先設置設備
+    torch.cuda.set_device(local_rank)
+    
+    dist.init_process_group(
+        backend="nccl",  # Use NCCL for GPU-based training
+        init_method="env://",  # Use environment variables for initialization
+    )
+    torch.cuda.set_device(int(os.environ["LOCAL_RANK"]))  # Set the device for this process
+    
+    
 def get_system_info() -> dict[str, Any]:
     """
     Get comprehensive system information.
@@ -203,7 +220,7 @@ def get_system_info() -> dict[str, Any]:
     
     return info
 
-def get_gpu_utilization() -> Dict[str, Any]:
+def get_gpu_utilization() -> dict[str, Any]:
     """
     Get GPU utilization percentage and memory usage using GPUtil.
     
@@ -267,3 +284,21 @@ def get_gpu_utilization() -> Dict[str, Any]:
         logger.warning(f"Failed to get GPU utilization with GPUtil: {e}")
     
     return gpu_info
+
+def print_gpu_utils(stream_obj:tqdm | None) -> None:
+    if stream_obj is None:
+        return
+    gpu_util_percent = []
+    gpu_mem_percent = []
+    gpu_used_gb = []
+    gpu_total_gb = []
+    devices = get_gpu_utilization().get('devices', [])
+    for gpu in devices:
+        gpu_util_percent.append(gpu.get('gpu_utilization_percent', 0))
+        gpu_mem_percent.append(gpu.get('memory_utilization_percent', 0))
+        gpu_used_gb.append(gpu.get('memory_used_gb', 0))
+        gpu_total_gb.append(gpu.get('memory_total_gb', 0))
+    
+    stream_obj.set_postfix_str(
+        " // ".join(f"""GPU{i} Util: {gpu_util_percent[i]:.1f}% | GPU{i} Mem: {gpu_mem_percent[i]:.1f}% ({gpu_used_gb[i]:.1f}GB/{gpu_total_gb[i]:.1f}GB)""" for i in range(len(devices)))
+    )

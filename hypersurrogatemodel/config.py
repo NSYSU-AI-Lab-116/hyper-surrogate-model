@@ -9,7 +9,7 @@ import os
 import yaml
 import json
 import inspect
-from typing import Dict, Any, Optional, Union
+from typing import Any, Union
 from typing import get_type_hints, get_origin, get_args
 from pathlib import Path
 from dataclasses import dataclass
@@ -76,7 +76,7 @@ class HyperConfig:
     """Path configuration settings."""
     save_basepath: str 
     addition_name: str
-    index_path: Optional[str]  = None
+    index_path: str | None  = None
     fs: list[dict[str,Any]] | None  = None
     new_version_dir: str | None = None
     
@@ -119,7 +119,7 @@ class ConfigManager:
             cls._instance = super().__new__(cls)
         return cls._instance
     
-    def load_config(self, config_path: Optional[Union[str, Path]] = None):
+    def load_config(self, config_path: str | Path | None = None):
         """
         Initialize configuration manager.
         
@@ -348,7 +348,7 @@ class ConfigManager:
             if hasattr(expected_type, '__origin__'):
                 if get_origin(expected_type) is Union:
                     return type(None) in get_args(expected_type)
-            return 'None' in str(expected_type) or 'Optional' in str(expected_type)
+            return 'None' in str(expected_type)
         
         if hasattr(expected_type, '__origin__'):
             if get_origin(expected_type) is Union:
@@ -429,7 +429,7 @@ class ConfigManager:
         
         return args
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert configuration to dictionary."""
 
         return {
@@ -481,7 +481,7 @@ class ConfigManager:
             },
         }
     
-    def save_config(self, path: Optional[Union[str, Path]] = None):
+    def save_config(self, path: str | Path | None = None):
         """Save current configuration to YAML file."""
         save_path = Path(path) if path else self.config_path
         with open(save_path, 'w', encoding='utf-8') as f:
@@ -498,7 +498,7 @@ class ConfigManager:
                 print(f"  {key}: {value}")
 
 
-def get_config(config_path: Optional[Union[str, Path]] = None):
+def get_config(config_path: str | Path | None = None):
     """Get the singleton configuration instance."""
     config_manager = ConfigManager()
     if not config_manager._config_loaded:

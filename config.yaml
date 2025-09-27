@@ -37,7 +37,7 @@ run_mode:
   mode: trans_train
 training:
   train_type: from_pretrained
-  batch_size: 24
+  batch_size: 18
   learning_rate: 2e-5
   num_epochs: 12
   gradient_accumulation_steps: 1

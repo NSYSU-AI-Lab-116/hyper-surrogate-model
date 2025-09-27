@@ -1,10 +1,12 @@
 """
 Command Line Interface for Hyper Surrogate Model
 """
+
 import sys
 import subprocess
 from pathlib import Path
 from hypersurrogatemodel import Logger
+
 logger = Logger("CLI")
 
 exe_path = sys.executable

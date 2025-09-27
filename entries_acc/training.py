@@ -1,4 +1,4 @@
-import json 
+import json
 import torch
 import os
 import time
@@ -13,7 +13,7 @@ from hypersurrogatemodel.config import config
 import torch.distributed as dist
 
 logger = Logger(name="Pipelined-runner")
-torch.set_float32_matmul_precision(precision='high')
+torch.set_float32_matmul_precision(precision="high")
 
 if torch.cuda.is_available():
     torch.cuda.empty_cache()

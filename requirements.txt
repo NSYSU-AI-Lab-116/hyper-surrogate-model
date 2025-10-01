@@ -46,3 +46,7 @@ tensorboard>=2.13.0
 # Data preprocessing
 nas-bench-201
 pyarrow
+
+# Data preprocessing
+nas-bench-201
+pyarrow

@@ -25,9 +25,6 @@ import torch.distributed as dist
 logger = Logger(name="Pipelined-runner")
 torch.set_float32_matmul_precision(precision="high")
 
-if torch.cuda.is_available():
-    torch.cuda.empty_cache()
-
 STOP_REQUESTED = False
 STEP_TO_SYNC = 10
 
@@ -45,9 +42,9 @@ def load_training_data(data_path):
         train_data = json.load(f)
     return train_data
 
-def create_dataloaders(train_data, tokenizer, batch_size, distributed=False):
+def create_dataloaders(train_data, tokenizer, batch_size):
     train_dataset = TrainingDataset(train_data, tokenizer, max_length=512)
-    sampler = DistributedSampler(train_dataset) if distributed else None
+    sampler = DistributedSampler(train_dataset)
     train_dataloader = DataLoader(
         dataset=train_dataset, 
         batch_size=batch_size,
@@ -59,7 +56,7 @@ def create_dataloaders(train_data, tokenizer, batch_size, distributed=False):
     )
     return train_dataset, train_dataloader, sampler
 
-def initialize_model(device, distributed=False):
+def initialize_model(device):
     """initialize model and wrap with DDP"""
     model = TrainableLLM(load_type="from_pretrained", use_lora=True)
     info = model.get_model_info()
@@ -67,8 +64,7 @@ def initialize_model(device, distributed=False):
     logger.info(f"Trainable parameters: {info['trainable_parameters']:,}")
     model = model.to(device)
     
-    # 不要在這裡呼叫 setup_distributed()
-    if distributed and torch.cuda.device_count() > 1:
+    if torch.cuda.device_count() > 1:
         logger.info(f"Using {torch.cuda.device_count()} GPUs with DistributedDataParallel")
         dp_model = torch.nn.parallel.DistributedDataParallel(
             model,
@@ -105,29 +101,20 @@ def save_model_when_all_done(model, optimizer, epochs, data_path, batch_size, lo
     
     synchronize_all_processes()
 
-def acc_trainer(distributed: bool = False) -> None:
-    """train with acc strategy"""
+def trainer(loss_function) -> None:
+    """train with distributed"""
     try:
         local_rank = int(os.environ.get("LOCAL_RANK", "0"))
         if torch.cuda.is_available():
             torch.cuda.set_device(local_rank)
             device = torch.device(f"cuda:{torch.cuda.current_device()}")
-        else:
-            device = torch.device("cpu")
+        try:
+            setup_distributed()
+            rank = dist.get_rank()
+            world_size = dist.get_world_size()
+        except:
+            logger.warning("Failed to initialize distributed training, falling back to single-GPU mode")
             distributed = False
-    
-        if distributed:
-            try:
-                setup_distributed()
-                
-                rank = dist.get_rank()
-                world_size = dist.get_world_size()
-            except:
-                logger.warning("Failed to initialize distributed training, falling back to single-GPU mode")
-                distributed = False
-                rank = 0
-                world_size = 1
-        else:
             rank = 0
             world_size = 1
         
@@ -139,10 +126,10 @@ def acc_trainer(distributed: bool = False) -> None:
         if rank == 0:
             logger.info(f"Loaded {train_length} training samples")
         
-        model = initialize_model(device, distributed)
+        model = initialize_model(device)
         
         _, train_dataloader, sampler = create_dataloaders(
-            train_data, model.tokenizer, BATCH_SIZE, distributed
+            train_data, model.tokenizer, BATCH_SIZE
         )
         
         optimizer = AdamW(model.params(), lr=config.training.learning_rate)
@@ -150,12 +137,8 @@ def acc_trainer(distributed: bool = False) -> None:
         
         num_update_steps_per_epoch = len(train_dataloader)
 
-        if distributed:
-            max_train_steps = EPOCHS * num_update_steps_per_epoch
-            total_steps_all_gpus = max_train_steps * world_size
-        else:
-            max_train_steps = EPOCHS * num_update_steps_per_epoch
-            total_steps_all_gpus = max_train_steps
+        max_train_steps = EPOCHS * num_update_steps_per_epoch
+        total_steps_all_gpus = max_train_steps * world_size
 
         if rank == 0:
             logger.info(f"***** Running training *****")
@@ -239,13 +222,9 @@ def acc_trainer(distributed: bool = False) -> None:
                 
                 if rank == 0:
                     loss_history.append(avg_loss.item())
-                
-                if rank == 0 and progress_bar is not None:
-                    if not distributed:
-                        progress_bar.update(1)
                         
                 # sync all gpu steps
-                if step % STEP_TO_SYNC == 0 and distributed:  # step to sync
+                if step % STEP_TO_SYNC == 0:  # step to sync
                     step_tensor = torch.tensor(local_step_count, device=device)
                     torch.distributed.all_reduce(step_tensor, op=torch.distributed.ReduceOp.SUM)
                     
@@ -293,4 +272,4 @@ def acc_trainer(distributed: bool = False) -> None:
 
 
 if __name__ == "__main__":
-    acc_trainer(distributed=True)
+    trainer()

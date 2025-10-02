@@ -17,10 +17,15 @@ from accelerate import Accelerator
 from torch.utils.data import Dataset
 from .utils import Logger , get_gpu_utilization as gpu_util
 from .config import config
+import huggingface_hub
+import dotenv 
 
 logger = Logger("model")
 torch.set_float32_matmul_precision("high")
 
+dotenv.load_dotenv()
+if os.getenv("huggingface_hub_api_token") is not None:
+    huggingface_hub.login(token=os.getenv("huggingface_hub_api_token"))
 
 class TrainingDataset(Dataset):
     """Custom dataset for accelerate training"""
@@ -97,6 +102,7 @@ class TrainableLLM(nn.Module):
         load_type: Literal["from_pretrained", "from_saved"],
         use_lora: bool | None = None,
         num_outputs: int = 1,
+        loss_fn: Any | None = None,
     ):
         """
         Initialize the trainable language model.
@@ -110,11 +116,12 @@ class TrainableLLM(nn.Module):
         super().__init__()
         self.use_lora = use_lora if use_lora is not None else False
         self.num_outputs = num_outputs
+        self.load_type = load_type
         self.load_model(load_type=load_type)
+        self.loss_fn = loss_fn if loss_fn is not None else self.loss_fn
         logger.info("Model initialization complete.")
 
     def forward(self, input_ids, attention_mask=None, numerical_targets=None, **kwargs):
-        # Ensure model returns dict + hidden states
         outputs = self.model(
             input_ids,
             attention_mask=attention_mask,
@@ -122,29 +129,15 @@ class TrainableLLM(nn.Module):
             return_dict=True,
             **kwargs,
         )
-
-        result = {
-            "logits": outputs.logits if hasattr(outputs, "logits") else None,
-            "loss": None,  # We'll calculate this properly later
-        }
+        
         # Numerical prediction
         if not hasattr(outputs, "hidden_states"):
             raise RuntimeError("Addition hidden layer not working")
         hidden_states = outputs.hidden_states[-1]
 
-        # re-run with output_hidden_states
         if hidden_states is None:
-            with torch.no_grad():
-                model_outputs = self.model(
-                    input_ids=input_ids,
-                    attention_mask=attention_mask,
-                    output_hidden_states=True,
-                    return_dict=True,
-                    **kwargs,
-                )
-                hidden_states = model_outputs.hidden_states[-1]
+            return result
 
-        # Pool last token according to attention_mask (safer than fixed -1)
         if attention_mask is None:
             last_hidden_states = hidden_states[:, -1, :]
             logger.warning("Attention mask not provided; using last token for pooling.")
@@ -156,7 +149,7 @@ class TrainableLLM(nn.Module):
             
         last_hidden_states = last_hidden_states.to(self.numerical_head[0].weight.device)  # type: ignore # ensure to set self.numerical_head device
         numerical_outputs = self.numerical_head(last_hidden_states)  # type: ignore
-        result["numerical_outputs"] = numerical_outputs
+        result.update({"numerical_outputs": numerical_outputs})
 
         # Calculate numerical loss if targets provided
         if numerical_targets is not None:
@@ -165,6 +158,11 @@ class TrainableLLM(nn.Module):
             result["loss"] = numerical_loss
         else:
             logger.error("Numerical loss is None despite targets being provided.")
+            
+        if torch.isnan(result["loss"]).any() or torch.isinf(result["loss"]).any():
+            logger.error("Loss is NaN or Inf")
+            result.update({"loss": 0.0})
+        
         return result
 
     def loss_fn(self, predictions, targets):
@@ -177,7 +175,6 @@ class TrainableLLM(nn.Module):
     def _setup_lora(self, lora_config: dict[str, Any] | None = None) -> None:
         """Set up LoRA configuration"""
         if lora_config is None:
-            # Use configuration from config file
             lora_config = {
                 "task_type": TaskType.CAUSAL_LM,
                 "r": config.lora.r,  # type: ignore
@@ -204,9 +201,7 @@ class TrainableLLM(nn.Module):
                 trust_remote_code=True,
                 attn_implementation="eager",
             )
-            logger.info(
-                f"loading model from pretrained: {config.model.pretrained_model}"
-            )
+            logger.info(f"loading model from pretrained: {config.model.pretrained_model}")
             self.hidden_size = self.model.config.hidden_size
             mid = max(1, self.hidden_size // 2)
             self.numerical_head = nn.Sequential(
@@ -387,9 +382,6 @@ class TrainableLLM(nn.Module):
             numerical_params = 0
 
         return {
-            "base_model": None
-            if not hasattr(self, "base_model_name")
-            else self.base_model,
             "use_lora": self.use_lora,
             "num_outputs": self.num_outputs,
             "total_parameters": total_params,
@@ -398,13 +390,22 @@ class TrainableLLM(nn.Module):
             "numerical_head_parameters": numerical_params,
         }
 
-    def train_mode(self):
+    def train_mode(self, LLM_trainable: bool = True):
+        logger.setFunctionsName("train_mode transition")
+        logger.info(f"Setting model to train mode. LLM_trainable={LLM_trainable}")
         self.model.train()
+        for param in self.model.parameters():
+            param.requires_grad = LLM_trainable
+        
         if hasattr(self, "numerical_head") and self.numerical_head is not None:
             self.numerical_head.train()
 
     def eval_mode(self):
+        logger.setFunctionsName("eval_mode transition")
+        logger.info(f"Setting model to eval mode.")
         self.model.eval()
+        for param in self.model.parameters():
+            param.requires_grad = False
         if hasattr(self, "numerical_head") and self.numerical_head is not None:
             self.numerical_head.eval()
 

@@ -69,16 +69,6 @@ class DatasetConfig:
 
 
 @dataclass
-class ComparisonConfig:
-    """Comparison and tuning configuration settings."""
-
-    method: str
-    batch_size: int
-    similarity_threshold: float
-    tuning_strategy: str
-
-
-@dataclass
 class HyperConfig:
     """Path configuration settings."""
 
@@ -148,7 +138,6 @@ class ConfigManager:
         self.training = self._create_training_config()
         self.lora = self._create_lora_config()
         self.dataset = self._create_dataset_config()
-        self.comparison = self._create_comparison_config()
         self.hyper = self._create_hyper_config()
 
         if self.run_mode == "data":
@@ -311,19 +300,6 @@ class ConfigManager:
             ),
         )
 
-    def _create_comparison_config(self) -> ComparisonConfig:
-        """Create comparison configuration."""
-        return ComparisonConfig(
-            method=self._get_config_value("comparison", "method", "similarity"),
-            batch_size=self._get_config_value("comparison", "batch_size", 32, int),
-            similarity_threshold=self._get_config_value(
-                "comparison", "similarity_threshold", 0.8, float
-            ),
-            tuning_strategy=self._get_config_value(
-                "comparison", "tuning_strategy", "error_focused"
-            ),
-        )
-
     def _create_hyper_config(self) -> HyperConfig:
         """Create path configuration."""
         return HyperConfig(
@@ -375,8 +351,6 @@ class ConfigManager:
                     config_class = LoRAConfig
                 elif section == "hyper":
                     config_class = HyperConfig
-                elif section == "comparison":
-                    config_class = ComparisonConfig
 
                 if config_class:
                     type_hints = get_type_hints(config_class)
@@ -516,12 +490,6 @@ class ConfigManager:
                 "preprocess_train_path": self.dataset.preprocess_train_path,
                 "preprocess_test_path": self.dataset.preprocess_test_path,
                 "preprocess_srouce_path": self.dataset.preprocess_source_path,
-            },
-            "comparison": {
-                "method": self.comparison.method,
-                "batch_size": self.comparison.batch_size,
-                "similarity_threshold": self.comparison.similarity_threshold,
-                "tuning_strategy": self.comparison.tuning_strategy,
             },
             "hyper": {
                 "save_basepath": self.hyper.save_basepath,

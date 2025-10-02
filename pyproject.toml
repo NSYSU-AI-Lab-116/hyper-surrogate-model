@@ -23,6 +23,7 @@ dependencies = [
     "nas-bench-201>=2.1",
     "scipy>=1.16.1",
     "huggingface-hub>=0.34.4",
+    "dotenv>=0.9.9",
 ]
 
 [project.optional-dependencies]

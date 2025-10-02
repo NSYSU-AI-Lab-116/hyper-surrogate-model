@@ -95,6 +95,8 @@ class Logger:
 
     def _log_with_function(self, level, message):
         """Internal method to add function name to log record."""
+        if dist.get_rank() != 0:
+            return
         record = self.logger.makeRecord(
             self.logger.name, level, __file__, 0, message, (), None
         )
@@ -257,8 +259,7 @@ def get_gpu_utilization() -> dict[str, Any]:
         total_gpu_util = 0.0
         total_memory_used = 0.0
         total_memory_total = 0.0
-        for gpu in gpus:  # 修復：直接迭代 gpus，不是 gpus[0]
-            # GPUtil provides memory in MB, convert to GB
+        for gpu in gpus[2:4]: 
             memory_used_gb = gpu.memoryUsed / 1024
             memory_total_gb = gpu.memoryTotal / 1024
             memory_free_gb = gpu.memoryFree / 1024
@@ -314,5 +315,5 @@ def print_gpu_utils(stream_obj:tqdm | None) -> None:
         gpu_total_gb.append(gpu.get('memory_total_gb', 0))
     
     stream_obj.set_postfix_str(
-        " // ".join(f"""GPU{i} Util: {gpu_util_percent[i]:.1f}% | GPU{i} Mem: {gpu_mem_percent[i]:.1f}% ({gpu_used_gb[i]:.1f}GB/{gpu_total_gb[i]:.1f}GB)""" for i in range(len(devices)))
+        " // ".join(f"""GPU{i+2} Util: {gpu_util_percent[i]:.1f}% | GPU{i+2} Mem: {gpu_mem_percent[i]:.1f}% ({gpu_used_gb[i]:.1f}GB/{gpu_total_gb[i]:.1f}GB)""" for i in range(len(devices)))
     )
